@@ -46,6 +46,14 @@ class TokenType(Enum):
     STRUCT = auto()
     PANIC = auto()
     RECOVER = auto()
+    ASSERT = auto()
+    TEST = auto()
+    BENCH = auto()
+    PROMPT = auto()
+    SECURE = auto()
+    SHARED = auto()
+    STATE = auto()
+    AT = auto() # @
 
     # Literals
     IDENTIFIER = auto()
@@ -90,6 +98,7 @@ class TokenType(Enum):
     DOT = auto()
     SEMICOLON = auto()
     ARROW = auto() # =>
+    DOLLAR = auto()
 
     EOF = auto()
 
@@ -144,6 +153,13 @@ class Lexer:
         "struct": TokenType.STRUCT,
         "panic": TokenType.PANIC,
         "recover": TokenType.RECOVER,
+        "assert": TokenType.ASSERT,
+        "test": TokenType.TEST,
+        "bench": TokenType.BENCH,
+        "prompt": TokenType.PROMPT,
+        "secure": TokenType.SECURE,
+        "shared": TokenType.SHARED,
+        "state": TokenType.STATE,
         "true": TokenType.BOOLEAN,
         "false": TokenType.BOOLEAN,
         "null": TokenType.NULL,
@@ -171,12 +187,14 @@ class Lexer:
         ('POWER',     r'\*\*'),
         ('STAR',      r'\*'),
         ('COMMENT',   r'//.*'),
+        ('MULTI_COMMENT', r'/\*[\s\S]*?\*/'),
         ('SLASH',     r'/'),
         ('PERCENT',   r'%'),
         ('ASSIGN',    r'='),
         ('LT',        r'<'),
         ('GT',        r'>'),
         ('NOT',       r'!'),
+        ('AT',        r'@'),
         ('LPAREN',    r'\('),
         ('RPAREN',    r'\)'),
         ('LBRACE',    r'\{'),
@@ -187,6 +205,7 @@ class Lexer:
         ('COLON',     r':'),
         ('DOT',       r'\.'),
         ('SEMICOLON', r';'),
+        ('DOLLAR',    r'\$'),
         ('NEWLINE',   r'\n'),
         ('SKIP',      r'[ \t\r]+'),
         ('MISMATCH',  r'.'),
@@ -218,7 +237,9 @@ class Lexer:
             elif kind == 'NEWLINE':
                 self.line += 1
                 self.column_start = mo.end()
-            elif kind == 'SKIP' or kind == 'COMMENT':
+            elif kind == 'SKIP' or kind == 'COMMENT' or kind == 'MULTI_COMMENT':
+                if kind == 'MULTI_COMMENT':
+                    self.line += value.count('\n')
                 pass
             elif kind == 'MISMATCH':
                 raise RuntimeError(f'{value!r} unexpected on line {self.line}')

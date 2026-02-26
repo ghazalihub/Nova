@@ -22,4 +22,23 @@ def plot(data, type="scatter"):
         plt.plot(data)
     plt.show()
 
-__all__ = ["theme", "Dashboard", "plot"]
+def plot3d(x, y, z):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(x, y, z)
+    plt.show()
+
+def hist(data):
+    plt.hist(data)
+    plt.show()
+
+def animate(series):
+    print("Animating series...")
+
+def annotate(text, pos):
+    plt.annotate(text, pos)
+
+def show_map(df):
+    print("Displaying interactive map...")
+
+__all__ = ["theme", "Dashboard", "plot", "plot3d", "hist", "animate", "annotate", "show_map"]

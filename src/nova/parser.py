@@ -54,8 +54,12 @@ class Parser:
         if self.match(TokenType.TRAIN):
             return self.train_statement()
         if self.match(TokenType.ASYNC):
-            self.consume(TokenType.FN, "Expect 'fn' after 'async'.")
-            return self.function_declaration(is_async=True)
+            if self.match(TokenType.FN):
+                return self.function_declaration(is_async=True)
+            elif self.match(TokenType.FOR):
+                return self.for_statement(is_parallel=False, is_async=True)
+            else:
+                raise RuntimeError("Expect 'fn' or 'for' after 'async'.")
         if self.match(TokenType.FN):
             return self.function_declaration()
         if self.match(TokenType.WITH):
@@ -83,6 +87,21 @@ class Parser:
             return stmt
         if self.match(TokenType.RECOVER):
             return RecoverStmt(self.block())
+        if self.match(TokenType.ASSERT):
+            stmt = AssertStmt(self.expression())
+            self.match(TokenType.SEMICOLON)
+            return stmt
+        if self.match(TokenType.TEST):
+            return self.test_statement()
+        if self.match(TokenType.BENCH):
+            return self.bench_statement()
+        if self.match(TokenType.PROMPT):
+            return self.prompt_declaration()
+        if self.match(TokenType.SECURE):
+            return SecureStmt(self.block())
+        if self.match(TokenType.SHARED):
+            self.consume(TokenType.STATE, "Expect 'state' after 'shared'.")
+            return SharedStateStmt(self.block())
         if self.match(TokenType.MATCH):
             return self.match_statement()
         if self.match(TokenType.TRY):
@@ -199,6 +218,33 @@ class Parser:
         self.match(TokenType.SEMICOLON)
         return PlotStmt(target, options)
 
+    def test_statement(self) -> TestStmt:
+        name = self.consume(TokenType.STRING, "Expect test name string.").value
+        body = self.block()
+        return TestStmt(name, body)
+
+    def bench_statement(self) -> BenchStmt:
+        name = self.consume(TokenType.STRING, "Expect bench name string.").value
+        body = self.block()
+        return BenchStmt(name, body)
+
+    def prompt_declaration(self) -> PromptDecl:
+        name = self.consume(TokenType.IDENTIFIER, "Expect prompt name.").value
+        self.consume(TokenType.LBRACE, "Expect '{' before prompt body.")
+        # Prompts can contain anything until '}'
+        # We need to balance braces
+        content = ""
+        brace_count = 1
+        while brace_count > 0 and not self.check(TokenType.EOF):
+             if self.check(TokenType.LBRACE): brace_count += 1
+             elif self.check(TokenType.RBRACE): brace_count -= 1
+
+             if brace_count > 0:
+                  content += self.advance().value + " "
+
+        self.consume(TokenType.RBRACE, "Expect '}' after prompt body.")
+        return PromptDecl(name, [ExpressionStatement(Literal(content.strip()))])
+
     def if_statement(self) -> IfStatement:
         self.consume(TokenType.LPAREN, "Expect '(' after 'if'.")
         condition = self.expression()
@@ -212,14 +258,15 @@ class Parser:
                 else_block = self.block()
         return IfStatement(condition, then_block, else_block)
 
-    def for_statement(self, is_parallel: bool) -> ForStatement:
+    def for_statement(self, is_parallel: bool, is_async: bool = False) -> ForStatement:
         self.consume(TokenType.LPAREN, "Expect '(' after 'for'.")
         target = self.consume(TokenType.IDENTIFIER, "Expect loop variable name.").value
         self.consume(TokenType.IN, "Expect 'in' after loop variable.")
         iterable = self.expression()
         self.consume(TokenType.RPAREN, "Expect ')' after for clauses.")
         body = self.block()
-        return ForStatement(target, iterable, body, is_parallel)
+        # Note: Need to add is_async to ForStatement AST if not there
+        return ForStatement(target, iterable, body, is_parallel, is_async)
 
     def model_declaration(self) -> ModelDeclaration:
         name = self.consume(TokenType.IDENTIFIER, "Expect model name.").value
@@ -370,6 +417,10 @@ class Parser:
         return expr
 
     def unary(self) -> Expression:
+        if self.match(TokenType.AT):
+            name = self.consume(TokenType.IDENTIFIER, "Expect decorator name.").value
+            expr = self.statement()
+            return DecoratorExpr(name, expr)
         if self.match(TokenType.NOT, TokenType.MINUS):
             op = self.tokens[self.pos-1].value
             operand = self.unary()

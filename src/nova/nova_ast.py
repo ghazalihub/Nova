@@ -153,6 +153,7 @@ class ForStatement(Statement):
     iterable: Expression
     body: List[Statement]
     is_parallel: bool = False
+    is_async: bool = False
 
 @dataclass
 class WhileStatement(Statement):
@@ -205,6 +206,10 @@ class PanicStmt(Statement):
     message: Expression
 
 @dataclass
+class AssertStmt(Statement):
+    condition: Expression
+
+@dataclass
 class RecoverStmt(Statement):
     body: List[Statement]
 
@@ -219,6 +224,34 @@ class CatchBlock(Node):
     variable: str
     type_hint: Optional[str]
     body: List[Statement]
+
+@dataclass
+class TestStmt(Statement):
+    name: str
+    body: List[Statement]
+
+@dataclass
+class BenchStmt(Statement):
+    name: str
+    body: List[Statement]
+
+@dataclass
+class PromptDecl(Statement):
+    name: str
+    body: List[Statement]
+
+@dataclass
+class SecureStmt(Statement):
+    body: List[Statement]
+
+@dataclass
+class SharedStateStmt(Statement):
+    body: List[Statement]
+
+@dataclass
+class DecoratorExpr(Node):
+    name: str
+    expression: Union[Statement, Expression]
 
 @dataclass
 class Program(Node):

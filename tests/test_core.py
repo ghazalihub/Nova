@@ -96,3 +96,44 @@ def test_try_catch():
     assert "try:" in code
     assert "except ValueError as e:" in code
     assert "finally:" in code
+
+def test_nullish_coalesce():
+    source = "let x = a ?? b;"
+    lexer = Lexer(source)
+    tokens = lexer.tokenize()
+    parser = Parser(tokens)
+    ast = parser.parse()
+    generator = CodeGenerator()
+    code = generator.generate(ast)
+    assert "(a if a is not None else b)" in code
+
+def test_template_literal():
+    source = "let s = `hello ${name}`; "
+    lexer = Lexer(source)
+    tokens = lexer.tokenize()
+    parser = Parser(tokens)
+    ast = parser.parse()
+    generator = CodeGenerator()
+    code = generator.generate(ast)
+    assert "f\"hello {name}\"" in code
+
+def test_with_gpu():
+    source = "with (gpu(0)) { print(1); }"
+    lexer = Lexer(source)
+    tokens = lexer.tokenize()
+    parser = Parser(tokens)
+    ast = parser.parse()
+    generator = CodeGenerator()
+    code = generator.generate(ast)
+    assert "with torch.cuda.device(0):" in code
+
+def test_nn_block():
+    source = "let m = nn { Linear(10, 5); };"
+    lexer = Lexer(source)
+    tokens = lexer.tokenize()
+    parser = Parser(tokens)
+    ast = parser.parse()
+    generator = CodeGenerator()
+    code = generator.generate(ast)
+    assert "torch.nn.Sequential(" in code
+    assert "torch.nn.Linear(10, 5)" in code

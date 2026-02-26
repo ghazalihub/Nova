@@ -4,6 +4,7 @@ from src.nova.eval import *
 from src.nova.hardware import *
 from src.nova.exp import *
 from src.nova.viz import *
+from src.nova.storage import *
 
 class LazyProxy:
     def __init__(self, factory):
@@ -29,6 +30,11 @@ def plot(x, y, type="scatter"):
         plt.plot(x, y)
     plt.show()
 
+def secret(name):
+    import os
+    print(f"Accessing secret: {name}")
+    return os.getenv(name)
+
 def llm(prompt):
     print(f"[Nova AI] Processing prompt: {prompt}")
     return "AI-generated result based on: " + prompt
@@ -36,5 +42,6 @@ def llm(prompt):
 __all__ = [
     "Tensor", "DataFrame", "plot", "LazyProxy", "train_loop", "dim_index",
     "classification_report", "confusion_matrix", "get_device", "gpu", "gpu_context",
-    "start_run", "log_metric", "theme", "Dashboard", "llm"
+    "start_run", "log_metric", "theme", "Dashboard", "llm", "secret", "read", "write",
+    "save", "load", "freeze", "plot3d", "hist", "animate", "annotate", "show_map"
 ]

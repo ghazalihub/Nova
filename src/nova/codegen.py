@@ -17,6 +17,7 @@ class CodeGenerator:
         raise Exception(f'No gen_{type(node).__name__} method')
 
     def gen_Program(self, node: Program):
+        self.top_level_calls = []
         # Add necessary imports based on features used
         header = "import sys\nimport os\n"
         if any(self.contains_node_type(node, StructDecl) for stmt in node.statements):
@@ -25,6 +26,10 @@ class CodeGenerator:
              header += "import torch\nfrom torch.utils.data import DataLoader\n"
         if any(self.contains_node_type(node, MmapExpr) for stmt in node.statements):
              header += "import numpy as np\n"
+        if any(self.contains_node_type(node, TestStmt) for stmt in node.statements):
+             header += "import pytest\n"
+        if any(self.contains_node_type(node, BenchStmt) for stmt in node.statements):
+             header += "import timeit\n"
 
         # Traceback Hook for Nova Source Mapping
         header += """
@@ -38,7 +43,8 @@ sys.excepthook = _nova_excepthook
 """
 
         body = "\n".join(self.generate(stmt) for stmt in node.statements)
-        return header + body
+        footer = "\n".join(self.top_level_calls)
+        return header + body + "\n" + footer
 
     def contains_node_type(self, node, types):
         if isinstance(node, types):
@@ -184,6 +190,9 @@ sys.excepthook = _nova_excepthook
     def gen_PanicStmt(self, node: PanicStmt):
         return f"{self.indent()}raise RuntimeError({self.generate(node.message)})"
 
+    def gen_AssertStmt(self, node: AssertStmt):
+        return f"{self.indent()}assert {self.generate(node.condition)}"
+
     def gen_RecoverStmt(self, node: RecoverStmt):
         res = f"{self.indent()}try:\n"
         self.indent_level += 1
@@ -196,12 +205,74 @@ sys.excepthook = _nova_excepthook
         self.indent_level -= 1
         return res
 
+    def gen_TestStmt(self, node: TestStmt):
+        func_name = f"test_{node.name.replace(' ', '_')}"
+        res = f"{self.indent()}def {func_name}():\n"
+        self.indent_level += 1
+        body = "\n".join(self.generate(stmt) for stmt in node.body)
+        res += body if body else f"{self.indent()}pass"
+        self.indent_level -= 1
+        res += f"\n{self.indent()}{func_name}()"
+        return res
+
+    def gen_BenchStmt(self, node: BenchStmt):
+        func_name = f"bench_{node.name.replace(' ', '_')}"
+        res = f"{self.indent()}def {func_name}():\n"
+        self.indent_level += 1
+        res += f"{self.indent()}start = timeit.default_timer()\n"
+        body = "\n".join(self.generate(stmt) for stmt in node.body)
+        res += body if body else f"{self.indent()}pass"
+        res += f"\n{self.indent()}end = timeit.default_timer()\n"
+        res += f"{self.indent()}print(f'Bench {node.name}: {{end - start}}s')\n"
+        self.indent_level -= 1
+        res += f"\n{self.indent()}{func_name}()"
+        return res
+
+    def gen_PromptDecl(self, node: PromptDecl):
+        # Prompts are treated as a special string or function
+        content = ""
+        for stmt in node.body:
+             if isinstance(stmt, ExpressionStatement) and isinstance(stmt.expression, Literal):
+                  content += str(stmt.expression.value) + " "
+             else:
+                  content += self.generate(stmt) + " "
+        return f"{self.indent()}{node.name} = \"\"\"{content.strip()}\"\"\""
+
+    def gen_SecureStmt(self, node: SecureStmt):
+        res = f"{self.indent()}# Secure block (Sandboxed execution placeholder)\n"
+        res += f"{self.indent()}try:\n"
+        self.indent_level += 1
+        body = "\n".join(self.generate(stmt) for stmt in node.body)
+        res += body if body else f"{self.indent()}pass"
+        self.indent_level -= 1
+        res += f"\n{self.indent()}except Exception as e:\n"
+        res += f"{self.indent()}    print(f'Security violation: {{e}}')\n"
+        return res
+
+    def gen_SharedStateStmt(self, node: SharedStateStmt):
+        res = f"{self.indent()}# Shared State (Redis/Distributed placeholder)\n"
+        body = "\n".join(self.generate(stmt) for stmt in node.body)
+        return res + body
+
+    def gen_DecoratorExpr(self, node: DecoratorExpr):
+        # Decorators in Python are applied before the declaration
+        # But in our AST they wrap the expression/statement
+        inner = self.generate(node.expression).strip()
+        if node.name == "jit":
+             return f"{self.indent()}@torch.jit.script\n{inner}"
+        if node.name == "fastmath":
+             return f"{self.indent()}# @fastmath optimized\n{inner}"
+        return f"{self.indent()}@{node.name}\n{inner}"
+
     def gen_WithStmt(self, node: WithStmt):
         as_var = f" as {node.variable}" if node.variable else ""
         context_code = self.generate(node.context)
         # Handle special gpu context
-        if context_code == "gpu_context":
-             context_code = "torch.cuda.device(0)" if "torch" in globals() or True else "contextlib.nullcontext()"
+        if "gpu_context" in context_code:
+             # Very simplified mapping
+             import re
+             context_code = re.sub(r'gpu_context\((\d+)\)', r'torch.cuda.device(\1)', context_code)
+             context_code = re.sub(r'gpu_context', r'torch.cuda.device(0)', context_code)
 
         res = f"{self.indent()}with {context_code}{as_var}:\n"
         self.indent_level += 1

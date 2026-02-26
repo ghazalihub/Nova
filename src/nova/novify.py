@@ -31,6 +31,22 @@ class NovaUnparser(ast.NodeVisitor):
         args = [arg.arg for arg in node.args]
         self.write(", ".join(args))
 
+    def visit_ClassDef(self, node):
+        self.fill(f"class {node.name} {{")
+        self.indent_level += 1
+        for stmt in node.body:
+            self.visit(stmt)
+        self.indent_level -= 1
+        self.fill("}")
+
+    def visit_Import(self, node):
+        for alias in node.names:
+            self.fill(f"import {alias.name} from \"{alias.name}\";")
+
+    def visit_ImportFrom(self, node):
+        names = ", ".join(alias.name for alias in node.names)
+        self.fill(f"import {{ {names} }} from \"{node.module}\";")
+
     def visit_If(self, node):
         self.fill("if (")
         self.write(self.expr_to_str(node.test))
