@@ -40,6 +40,8 @@ class Parser:
     def statement(self) -> Statement:
         if self.match(TokenType.IMPORT):
             return self.import_statement()
+        if self.match(TokenType.EXPORT):
+            return ExportStmt(self.statement())
         if self.match(TokenType.LET, TokenType.CONST):
             return self.var_declaration(self.tokens[self.pos-1].type == TokenType.CONST, is_lazy=False)
         if self.match(TokenType.LAZY):
@@ -51,6 +53,9 @@ class Parser:
                 raise RuntimeError("Expect 'let' or 'const' after 'lazy'")
         if self.match(TokenType.TRAIN):
             return self.train_statement()
+        if self.match(TokenType.ASYNC):
+            self.consume(TokenType.FN, "Expect 'fn' after 'async'.")
+            return self.function_declaration(is_async=True)
         if self.match(TokenType.FN):
             return self.function_declaration()
         if self.match(TokenType.IF):
@@ -62,6 +67,16 @@ class Parser:
             return self.for_statement(is_parallel=True)
         if self.match(TokenType.MODEL):
             return self.model_declaration()
+        if self.match(TokenType.STRUCT):
+            return self.struct_declaration()
+        if self.match(TokenType.SCHEMA):
+            return self.schema_declaration()
+        if self.match(TokenType.PANIC):
+            stmt = PanicStmt(self.expression())
+            self.match(TokenType.SEMICOLON)
+            return stmt
+        if self.match(TokenType.RECOVER):
+            return RecoverStmt(self.block())
         if self.match(TokenType.MATCH):
             return self.match_statement()
         if self.match(TokenType.TRY):
@@ -109,7 +124,27 @@ class Parser:
         self.match(TokenType.SEMICOLON)
         return TrainStatement(model, dataset, options)
 
-    def function_declaration(self) -> FunctionDeclaration:
+    def struct_declaration(self) -> StructDecl:
+        name = self.consume(TokenType.IDENTIFIER, "Expect struct name.").value
+        self.consume(TokenType.LBRACE, "Expect '{' before struct body.")
+        fields = []
+        while not self.check(TokenType.RBRACE) and not self.check(TokenType.EOF):
+            f_name = self.consume(TokenType.IDENTIFIER, "Expect field name.").value
+            self.consume(TokenType.COLON, "Expect ':' after field name.")
+            f_type = self.consume(TokenType.IDENTIFIER, "Expect field type.").value
+            fields.append({"name": f_name, "type": f_type})
+            self.match(TokenType.SEMICOLON)
+        self.consume(TokenType.RBRACE, "Expect '}' after struct body.")
+        return StructDecl(name, fields)
+
+    def schema_declaration(self) -> SchemaDecl:
+        name = self.consume(TokenType.IDENTIFIER, "Expect schema name.").value
+        self.consume(TokenType.ASSIGN, "Expect '=' after schema name.")
+        definition = self.expression()
+        self.match(TokenType.SEMICOLON)
+        return SchemaDecl(name, definition)
+
+    def function_declaration(self, is_async: bool = False) -> FunctionDeclaration:
         name = self.consume(TokenType.IDENTIFIER, "Expect function name.").value
         self.consume(TokenType.LPAREN, "Expect '(' after function name.")
         parameters = []
@@ -127,7 +162,10 @@ class Parser:
         if self.match(TokenType.ARROW):
             return_type = self.consume(TokenType.IDENTIFIER, "Expect return type.").value
         body = self.block() if self.check(TokenType.LBRACE) else [self.expression_statement()]
-        return FunctionDeclaration(name, parameters, return_type, body if isinstance(body, list) else [body])
+        # Mapping constructor to __init__
+        if name == "constructor":
+            name = "__init__"
+        return FunctionDeclaration(name, parameters, return_type, body if isinstance(body, list) else [body], is_async)
 
     def if_statement(self) -> IfStatement:
         self.consume(TokenType.LPAREN, "Expect '(' after 'if'.")
@@ -247,7 +285,7 @@ class Parser:
         expr = self.equality()
         if self.match(TokenType.ASSIGN):
             value = self.assignment()
-            if isinstance(expr, Identifier):
+            if isinstance(expr, (Identifier, Call, MemberAccess)):
                 return BinaryOp(expr, "=", value) # Simplified
         return expr
 
@@ -277,7 +315,7 @@ class Parser:
 
     def factor(self) -> Expression:
         expr = self.unary()
-        while self.match(TokenType.STAR, TokenType.SLASH, TokenType.PERCENT):
+        while self.match(TokenType.STAR, TokenType.SLASH, TokenType.PERCENT, TokenType.POWER):
             op = self.tokens[self.pos-1].value
             right = self.unary()
             expr = BinaryOp(expr, op, right)
@@ -288,6 +326,8 @@ class Parser:
             op = self.tokens[self.pos-1].value
             operand = self.unary()
             return UnaryOp(op, operand)
+        if self.match(TokenType.AWAIT):
+            return AwaitExpr(self.unary())
         return self.call()
 
     def call(self) -> Expression:
@@ -343,12 +383,79 @@ class Parser:
             return Literal(self.tokens[self.pos-1].value)
         if self.match(TokenType.TEMPLATE_STRING):
             val = self.tokens[self.pos-1].value
-            # Basic conversion of ${var} to {var} for Python f-strings
-            val = val.replace("${", "{")
-            return TemplateLiteral([val])
+            # Proper parsing for ${}
+            parts = []
+            last_idx = 0
+            import re
+            for match in re.finditer(r'\$\{(.*?)\}', val):
+                parts.append(val[last_idx:match.start()])
+                # Recursively parse the expression inside ${}
+                inner_source = match.group(1)
+                from src.nova.lexer import Lexer
+                inner_tokens = Lexer(inner_source).tokenize()
+                inner_ast = Parser(inner_tokens).expression()
+                parts.append(inner_ast)
+                last_idx = match.end()
+            parts.append(val[last_idx:])
+            return TemplateLiteral(parts)
+        if self.match(TokenType.NN):
+             return NNBlock(self.block())
+        if self.match(TokenType.GRADIENT):
+             self.consume(TokenType.LPAREN, "Expect '(' after gradient.")
+             fn = self.expression()
+             vars = []
+             if self.match(TokenType.COMMA):
+                 while True:
+                     vars.append(self.expression())
+                     if not self.match(TokenType.COMMA):
+                         break
+             self.consume(TokenType.RPAREN, "Expect ')' after gradient args.")
+             return GradientExpr(fn, vars)
+        if self.match(TokenType.WEIGHTS):
+             self.consume(TokenType.LPAREN, "Expect '(' after weights.")
+             shape = self.expression()
+             self.consume(TokenType.RPAREN, "Expect ')' after weights shape.")
+             return WeightsExpr(shape)
+        if self.match(TokenType.BATCH):
+             self.consume(TokenType.LPAREN, "Expect '(' after batch.")
+             data = self.expression()
+             self.consume(TokenType.COMMA, "Expect ',' after dataset in batch.")
+             size = self.expression()
+             self.consume(TokenType.RPAREN, "Expect ')' after batch args.")
+             return BatchIterator(data, size)
+        if self.match(TokenType.MMAP):
+             self.consume(TokenType.LPAREN, "Expect '(' after mmap.")
+             path = self.expression()
+             self.consume(TokenType.RPAREN, "Expect ')' after mmap path.")
+             return MmapExpr(path)
         if self.match(TokenType.IDENTIFIER):
             return Identifier(self.tokens[self.pos-1].value)
         if self.match(TokenType.LPAREN):
+            # Check if it's a lambda: (a, b) => ...
+            # We use a very simple lookahead PoC
+            temp_pos = self.pos
+            is_lambda = False
+            paren_count = 1
+            while temp_pos < len(self.tokens) and paren_count > 0:
+                if self.tokens[temp_pos].type == TokenType.LPAREN: paren_count += 1
+                elif self.tokens[temp_pos].type == TokenType.RPAREN: paren_count -= 1
+                temp_pos += 1
+
+            if temp_pos < len(self.tokens) and self.tokens[temp_pos].type == TokenType.ARROW:
+                is_lambda = True
+
+            if is_lambda:
+                parameters = []
+                if not self.check(TokenType.RPAREN):
+                    while True:
+                        parameters.append(self.consume(TokenType.IDENTIFIER, "Expect parameter name.").value)
+                        if not self.match(TokenType.COMMA):
+                            break
+                self.consume(TokenType.RPAREN, "Expect ')' after parameters.")
+                self.consume(TokenType.ARROW, "Expect '=>' after lambda parameters.")
+                body = self.expression() # Simplified: only expression body for now
+                return Lambda(parameters, body)
+
             expr = self.expression()
             self.consume(TokenType.RPAREN, "Expect ')' after expression.")
             return expr

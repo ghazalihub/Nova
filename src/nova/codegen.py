@@ -3,6 +3,7 @@ from src.nova.nova_ast import *
 class CodeGenerator:
     def __init__(self):
         self.indent_level = 0
+        self.in_class_context = [] # Stack of bools
 
     def indent(self):
         return "    " * self.indent_level
@@ -16,19 +17,58 @@ class CodeGenerator:
         raise Exception(f'No gen_{type(node).__name__} method')
 
     def gen_Program(self, node: Program):
-        return "\n".join(self.generate(stmt) for stmt in node.statements)
+        # Add necessary imports based on features used
+        header = ""
+        if any(self.contains_node_type(node, StructDecl) for stmt in node.statements):
+             header += "from dataclasses import dataclass\n"
+        if any(self.contains_node_type(node, (NNBlock, GradientExpr, WeightsExpr, BatchIterator)) for stmt in node.statements):
+             header += "import torch\nfrom torch.utils.data import DataLoader\n"
+        if any(self.contains_node_type(node, MmapExpr) for stmt in node.statements):
+             header += "import numpy as np\n"
+
+        return header + "\n".join(self.generate(stmt) for stmt in node.statements)
+
+    def contains_node_type(self, node, types):
+        if isinstance(node, types):
+            return True
+        if hasattr(node, "__dict__"):
+            for val in node.__dict__.values():
+                if isinstance(val, list):
+                    if any(self.contains_node_type(v, types) for v in val):
+                        return True
+                elif self.contains_node_type(val, types):
+                    return True
+        return False
 
     def gen_ImportStatement(self, node: ImportStatement):
         names = ", ".join(node.names)
         return f"{self.indent()}from {node.source} import {names}"
 
+    def gen_ExportStmt(self, node: ExportStmt):
+        # We can maintain a set of exported names if we want to generate __all__
+        # For now, just generate the declaration
+        return self.generate(node.declaration)
+
     def gen_VarDeclaration(self, node: VarDeclaration):
         # Python doesn't have const at runtime in the same way, so we just generate assignment
         # We can add type hints if provided
-        type_hint = f": {node.type_hint}" if node.type_hint else ""
+        type_hint = ""
+        if node.type_hint:
+            type_hint = f": {self.map_type(node.type_hint)}"
+
         if node.is_lazy:
             return f"{self.indent()}{node.name}{type_hint} = LazyProxy(lambda: {self.generate(node.value)})"
         return f"{self.indent()}{node.name}{type_hint} = {self.generate(node.value)}"
+
+    def map_type(self, type_name):
+        mapping = {
+            "Int": "int",
+            "Float": "float",
+            "Str": "str",
+            "Bool": "bool",
+            "Null": "None"
+        }
+        return mapping.get(type_name, type_name)
 
     def gen_TrainStatement(self, node: TrainStatement):
         options = self.generate(node.options) if node.options else "None"
@@ -37,15 +77,22 @@ class CodeGenerator:
     def gen_FunctionDeclaration(self, node: FunctionDeclaration):
         async_prefix = "async " if node.is_async else ""
         params = []
+        # Check if we are inside a class/model (top-level method)
+        if self.in_class_context and self.in_class_context[-1]:
+             params.append("self")
+
+        # Nested functions should NOT have self injected unless they are inside a nested class
+        self.in_class_context.append(False) # Entering function body context
+
         for p in node.parameters:
             p_str = p['name']
             if p.get('type'):
-                p_str += f": {p['type']}"
+                p_str += f": {self.map_type(p['type'])}"
             params.append(p_str)
 
         header = f"{self.indent()}{async_prefix}def {node.name}({', '.join(params)})"
         if node.return_type:
-            header += f" -> {node.return_type}"
+            header += f" -> {self.map_type(node.return_type)}"
         header += ":"
 
         self.indent_level += 1
@@ -54,6 +101,7 @@ class CodeGenerator:
             body = f"{self.indent()}pass"
         self.indent_level -= 1
 
+        self.in_class_context.pop()
         return f"{header}\n{body}"
 
     def gen_IfStatement(self, node: IfStatement):
@@ -83,10 +131,19 @@ class CodeGenerator:
 
     def gen_ForStatement(self, node: ForStatement):
         if node.is_parallel:
-            # Parallel loop using multiprocessing (simplified)
-            # In a real implementation, we would wrap the body in a function
-            res = f"{self.indent()}# Parallel loop (Note: Requires multiprocessing orchestration in runtime)\n"
-            res += f"{self.indent()}for {node.target} in {self.generate(node.iterable)}:\n"
+            # Parallel loop using multiprocessing (simplified PoC)
+            # We assume a global pool or a simple map
+            res = f"{self.indent()}# Parallel loop\n"
+            res += f"{self.indent()}from multiprocessing import Pool\n"
+            res += f"{self.indent()}with Pool() as _nova_pool:\n"
+            self.indent_level += 1
+            body_expr = "None"
+            if node.body and isinstance(node.body[0], ExpressionStatement):
+                # We need the expression without the indentation and semicolon
+                body_expr = self.generate(node.body[0].expression).strip()
+            res += f"{self.indent()}_nova_pool.map(lambda {node.target}: {body_expr}, {self.generate(node.iterable)})\n"
+            self.indent_level -= 1
+            return res
         else:
             res = f"{self.indent()}for {node.target} in {self.generate(node.iterable)}:\n"
 
@@ -98,14 +155,45 @@ class CodeGenerator:
         self.indent_level -= 1
         return res
 
+    def gen_StructDecl(self, node: StructDecl):
+        res = f"{self.indent()}@dataclass\n{self.indent()}class {node.name}:\n"
+        self.indent_level += 1
+        for field in node.fields:
+            res += f"{self.indent()}{field['name']}: {self.map_type(field['type'])}\n"
+        if not node.fields:
+            res += f"{self.indent()}pass\n"
+        self.indent_level -= 1
+        return res.rstrip()
+
+    def gen_SchemaDecl(self, node: SchemaDecl):
+        # Mapping to a dictionary for validation at runtime
+        return f"{self.indent()}{node.name} = {self.generate(node.definition)}"
+
+    def gen_PanicStmt(self, node: PanicStmt):
+        return f"{self.indent()}raise RuntimeError({self.generate(node.message)})"
+
+    def gen_RecoverStmt(self, node: RecoverStmt):
+        res = f"{self.indent()}try:\n"
+        self.indent_level += 1
+        res += f"{self.indent()}pass # No-op for recover logic in PoC"
+        self.indent_level -= 1
+        res += f"\n{self.indent()}except Exception as e:\n"
+        self.indent_level += 1
+        body = "\n".join(self.generate(stmt) for stmt in node.body)
+        res += body if body else f"{self.indent()}pass"
+        self.indent_level -= 1
+        return res
+
     def gen_ModelDeclaration(self, node: ModelDeclaration):
         base = f"({node.base_class})" if node.base_class else ""
         res = f"{self.indent()}class {node.name}{base}:\n"
         self.indent_level += 1
+        self.in_class_context.append(True)
         body = "\n".join(self.generate(stmt) for stmt in node.members)
         if not body:
             body = f"{self.indent()}pass"
         res += body
+        self.in_class_context.pop()
         self.indent_level -= 1
         return res
 
@@ -168,6 +256,8 @@ class CodeGenerator:
 
     def gen_BinaryOp(self, node: BinaryOp):
         if node.op == "=":
+            # Check if we are in an expression context or statement context
+            # Simplified: always assume assignment if op is "="
             return f"{self.generate(node.left)} = {self.generate(node.right)}"
         if node.op == "??":
             l = self.generate(node.left)
@@ -194,6 +284,8 @@ class CodeGenerator:
         return f"{self.generate(node.object)}.{node.member}"
 
     def gen_Identifier(self, node: Identifier):
+        if node.name == "this":
+            return "self"
         return node.name
 
     def gen_Literal(self, node: Literal):
@@ -208,10 +300,53 @@ class CodeGenerator:
         parts = []
         for p in node.parts:
             if isinstance(p, str):
-                parts.append(p)
+                # Escape curly braces in f-strings
+                escaped = p.replace("{", "{{").replace("}", "}}")
+                parts.append(escaped)
             else:
                 parts.append("{" + self.generate(p) + "}")
         return f'f"{"".join(parts)}"'
+
+    def gen_NNBlock(self, node: NNBlock):
+        # Mapping to torch.nn.Sequential
+        res = "torch.nn.Sequential(\n"
+        self.indent_level += 1
+        items = []
+        for stmt in node.statements:
+             if isinstance(stmt, ExpressionStatement):
+                 # Automatic torch.nn. prefix for identifiers in nn block
+                 expr_code = self.generate(stmt.expression)
+                 if isinstance(stmt.expression, Call) and isinstance(stmt.expression.callee, Identifier):
+                      expr_code = "torch.nn." + expr_code
+                 items.append(f"{self.indent()}{expr_code}")
+        res += ",\n".join(items)
+        self.indent_level -= 1
+        res += "\n)"
+        return res
+
+    def gen_GradientExpr(self, node: GradientExpr):
+        vars = ", ".join(self.generate(v) for v in node.variables)
+        return f"torch.autograd.grad({self.generate(node.function)}, [{vars}])"
+
+    def gen_WeightsExpr(self, node: WeightsExpr):
+        return f"torch.randn({self.generate(node.shape)}, requires_grad=True)"
+
+    def gen_BatchIterator(self, node: BatchIterator):
+        return f"DataLoader({self.generate(node.dataset)}, batch_size={self.generate(node.size)})"
+
+    def gen_MmapExpr(self, node: MmapExpr):
+        return f"np.memmap({self.generate(node.path)})"
+
+    def gen_AwaitExpr(self, node: AwaitExpr):
+        return f"await {self.generate(node.expression)}"
+
+    def gen_Lambda(self, node: Lambda):
+        params = ", ".join(node.parameters)
+        if isinstance(node.body, list):
+             # Simplified: lambda body can't be a block in Python unless we use a nested function
+             # For PoC, just support expression bodies
+             return f"lambda {params}: {self.generate(node.body[0])}"
+        return f"lambda {params}: {self.generate(node.body)}"
 
     def gen_Pipeline(self, node: Pipeline):
         # x |> f(y)  => f(x, y)

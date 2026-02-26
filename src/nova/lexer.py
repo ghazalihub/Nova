@@ -29,6 +29,15 @@ class TokenType(Enum):
     TRAIN = auto()
     LAZY = auto()
     WITH = auto()
+    NN = auto()
+    GRADIENT = auto()
+    WEIGHTS = auto()
+    BATCH = auto()
+    MMAP = auto()
+    SCHEMA = auto()
+    STRUCT = auto()
+    PANIC = auto()
+    RECOVER = auto()
 
     # Literals
     IDENTIFIER = auto()
@@ -110,6 +119,15 @@ class Lexer:
         "train": TokenType.TRAIN,
         "lazy": TokenType.LAZY,
         "with": TokenType.WITH,
+        "nn": TokenType.NN,
+        "gradient": TokenType.GRADIENT,
+        "weights": TokenType.WEIGHTS,
+        "batch": TokenType.BATCH,
+        "mmap": TokenType.MMAP,
+        "schema": TokenType.SCHEMA,
+        "struct": TokenType.STRUCT,
+        "panic": TokenType.PANIC,
+        "recover": TokenType.RECOVER,
         "true": TokenType.BOOLEAN,
         "false": TokenType.BOOLEAN,
         "null": TokenType.NULL,
@@ -134,11 +152,11 @@ class Lexer:
         ('IDENTIFIER',r'[a-zA-Z_][a-zA-Z0-9_]*'),
         ('PLUS',      r'\+'),
         ('MINUS',     r'-'),
+        ('POWER',     r'\*\*'),
         ('STAR',      r'\*'),
         ('COMMENT',   r'//.*'),
         ('SLASH',     r'/'),
         ('PERCENT',   r'%'),
-        ('POWER',     r'\*\*'),
         ('ASSIGN',    r'='),
         ('LT',        r'<'),
         ('GT',        r'>'),

@@ -62,6 +62,23 @@ class DictLiteral(Expression):
     values: List[Expression]
 
 @dataclass
+class NNBlock(Expression):
+    statements: List[Statement]
+
+@dataclass
+class GradientExpr(Expression):
+    function: Expression
+    variables: List[Expression]
+
+@dataclass
+class WeightsExpr(Expression):
+    shape: Expression
+
+@dataclass
+class MmapExpr(Expression):
+    path: Expression
+
+@dataclass
 class Lambda(Expression):
     parameters: List[str]
     body: Union[Expression, List[Statement]]
@@ -100,6 +117,16 @@ class ModelDeclaration(Statement):
     members: List[Statement]
 
 @dataclass
+class StructDecl(Statement):
+    name: str
+    fields: List[dict] # name, type
+
+@dataclass
+class SchemaDecl(Statement):
+    name: str
+    definition: Expression
+
+@dataclass
 class IfStatement(Statement):
     condition: Expression
     then_block: List[Statement]
@@ -116,6 +143,15 @@ class ForStatement(Statement):
 class WhileStatement(Statement):
     condition: Expression
     body: List[Statement]
+
+@dataclass
+class BatchIterator(Expression):
+    dataset: Expression
+    size: Expression
+
+@dataclass
+class AwaitExpr(Expression):
+    expression: Expression
 
 @dataclass
 class ReturnStatement(Statement):
@@ -144,6 +180,18 @@ class MatchCase(Node):
 class ImportStatement(Statement):
     names: List[str]
     source: str
+
+@dataclass
+class ExportStmt(Statement):
+    declaration: Statement
+
+@dataclass
+class PanicStmt(Statement):
+    message: Expression
+
+@dataclass
+class RecoverStmt(Statement):
+    body: List[Statement]
 
 @dataclass
 class TryStatement(Statement):

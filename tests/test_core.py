@@ -72,7 +72,7 @@ def test_model_declaration():
     generator = CodeGenerator()
     code = generator.generate(ast)
     assert "class MyModel(Base):" in code
-    assert "def init():" in code
+    assert "def init(self):" in code
 
 def test_parallel_for():
     source = "parallel for (i in range(10)) { print(i); }"
@@ -83,7 +83,7 @@ def test_parallel_for():
     generator = CodeGenerator()
     code = generator.generate(ast)
     assert "# Parallel loop" in code
-    assert "for i in range(10):" in code
+    assert "_nova_pool.map" in code
 
 def test_try_catch():
     source = "try { dangerous(); } catch (e: ValueError) { handle(e); } finally { cleanup(); }"

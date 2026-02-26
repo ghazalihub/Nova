@@ -1,0 +1,18 @@
+import { Tensor } from "src.nova.stdlib";
+
+fn vector_test() {
+    let a = Tensor.randn([10]);
+    let b = Tensor.randn([10]);
+    let c = 5;
+    let result = Tensor.randn([10]);
+
+    // This should be auto-vectorized by ASTOptimizer
+    for (i in 0..10) {
+        result[i] = a[i] + b[i] * c;
+    }
+
+    print("Vectorized loop result:");
+    print(result);
+}
+
+vector_test();

@@ -1,0 +1,69 @@
+import { Tensor, train_loop, classification_report } from "src.nova.stdlib";
+
+// 1. Struct for data points
+struct Point {
+    x: Float;
+    y: Float;
+}
+
+// 2. Schema for validation
+schema PointSchema = { "x": "float", "y": "float" };
+
+// 3. Model definition using nn block
+export model AIModel {
+    fn constructor() {
+        this.layers = nn {
+            Linear(10, 5);
+            ReLU();
+            Linear(5, 2);
+        };
+    }
+
+    async fn forward(x) {
+        return await this.layers(x);
+    }
+}
+
+fn main() {
+    let m = AIModel();
+    let data = Tensor.randn([32, 10]);
+    let labels = Tensor.randn([32, 2]);
+
+    print(`Training ${m} for 5 epochs...`);
+
+    // 4. Training statement
+    train m with data {
+        epochs: 5,
+        learning_rate: 0.01
+    };
+
+    // 5. Gradient operator
+    let loss_fn = (m, x, y) => (m.forward(x) - y)**2;
+    // let grads = gradient(loss_fn, model); // Simplified
+
+    // 6. Template literals with expressions
+    let accuracy = 0.98;
+    print(`Final Accuracy: ${accuracy * 100}%`);
+
+    // 7. Panic/Recover
+    try {
+        if (accuracy < 0.99) {
+            panic("Accuracy too low!");
+        }
+    } catch (e) {
+        print(`Caught expected panic: ${e}`);
+        recover {
+             print("Recovered from low accuracy panic.");
+        }
+    }
+
+    // 8. Batch iterator
+    let ds = data; // Simplified for PoC
+    for (b in batch(ds, 8)) {
+        print("Processing batch...");
+    }
+
+    classification_report(labels, labels);
+}
+
+main();

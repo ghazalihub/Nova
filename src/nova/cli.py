@@ -5,6 +5,7 @@ import subprocess
 from src.nova.lexer import Lexer
 from src.nova.parser import Parser
 from src.nova.codegen import CodeGenerator
+from src.nova.optimizer import ASTOptimizer
 
 def main():
     parser = argparse.ArgumentParser(description="Nova Programming Language CLI")
@@ -32,7 +33,11 @@ def main():
     parser_obj = Parser(tokens)
     ast = parser_obj.parse()
 
-    # 3. CodeGen
+    # 3. Optimize
+    optimizer = ASTOptimizer()
+    ast = optimizer.optimize(ast)
+
+    # 4. CodeGen
     generator = CodeGenerator()
     python_code = generator.generate(ast)
 
@@ -50,6 +55,14 @@ def main():
 
         try:
             subprocess.run([sys.executable, temp_file], check=True)
+        except subprocess.CalledProcessError:
+            print("\n--- Nova AI Error Explanation ---")
+            print("It seems like your code encountered a runtime error in the generated Python code.")
+            print("Possible causes based on your Nova source:")
+            print("- Ensure all tensors have matching shapes for operations.")
+            print("- Check if your training loop options are correctly formatted as a dictionary.")
+            print("- Verify that you are not using keywords as variable names (e.g., 'model', 'batch').")
+            sys.exit(1)
         finally:
             if os.path.exists(temp_file):
                 os.remove(temp_file)
