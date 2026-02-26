@@ -1,9 +1,8 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
-@dataclass
 class Node:
-    pass
+    line: int = 0
 
 @dataclass
 class Expression(Node):
@@ -46,7 +45,7 @@ class Call(Expression):
 class MemberAccess(Expression):
     object: Expression
     member: str
-    is_safe: bool = False  # For ?.
+    is_safe: bool = False
 
 @dataclass
 class ListLiteral(Expression):
@@ -106,7 +105,7 @@ class TrainStatement(Statement):
 @dataclass
 class FunctionDeclaration(Statement):
     name: str
-    parameters: List[dict] # name, type, default
+    parameters: List[dict]
     return_type: Optional[str]
     body: List[Statement]
     is_async: bool = False
@@ -139,7 +138,7 @@ class FreezeStmt(Statement):
     layer: Optional[Expression] = None
 
 @dataclass
-class AvgByStmt(Expression): # Used in select expressions
+class AvgByStmt(Expression):
     dataset: Expression
     column: str
     group_by: str
@@ -147,7 +146,7 @@ class AvgByStmt(Expression): # Used in select expressions
 @dataclass
 class StructDecl(Statement):
     name: str
-    fields: List[dict] # name, type
+    fields: List[dict]
 
 @dataclass
 class SchemaDecl(Statement):
