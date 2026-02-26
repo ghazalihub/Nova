@@ -58,6 +58,12 @@ class Parser:
             return self.function_declaration(is_async=True)
         if self.match(TokenType.FN):
             return self.function_declaration()
+        if self.match(TokenType.WITH):
+            return self.with_statement()
+        if self.match(TokenType.CLEAN):
+            return self.clean_statement()
+        if self.match(TokenType.PLOT):
+            return self.plot_statement()
         if self.match(TokenType.IF):
             return self.if_statement()
         if self.match(TokenType.FOR):
@@ -91,7 +97,9 @@ class Parser:
         names = []
         if self.match(TokenType.LBRACE):
             while True:
-                names.append(self.consume(TokenType.IDENTIFIER, "Expect name to import.").value)
+                if not self.check(TokenType.RBRACE):
+                     names.append(self.advance().value)
+
                 if not self.match(TokenType.COMMA):
                     break
             self.consume(TokenType.RBRACE, "Expect '}' after import names.")
@@ -166,6 +174,30 @@ class Parser:
         if name == "constructor":
             name = "__init__"
         return FunctionDeclaration(name, parameters, return_type, body if isinstance(body, list) else [body], is_async)
+
+    def with_statement(self) -> WithStmt:
+        self.consume(TokenType.LPAREN, "Expect '(' after 'with'.")
+        context = self.expression()
+        variable = None
+        if self.match(TokenType.AS):
+            variable = self.consume(TokenType.IDENTIFIER, "Expect variable name after 'as'.").value
+        self.consume(TokenType.RPAREN, "Expect ')' after with expression.")
+        body = self.block()
+        return WithStmt(context, variable, body)
+
+    def clean_statement(self) -> CleanStmt:
+        target = self.expression()
+        self.match(TokenType.SEMICOLON)
+        return CleanStmt(target)
+
+    def plot_statement(self) -> PlotStmt:
+        target = self.expression()
+        options = None
+        if self.match(TokenType.LBRACE):
+            self.pos -= 1
+            options = self.expression()
+        self.match(TokenType.SEMICOLON)
+        return PlotStmt(target, options)
 
     def if_statement(self) -> IfStatement:
         self.consume(TokenType.LPAREN, "Expect '(' after 'if'.")
@@ -262,31 +294,47 @@ class Parser:
         return ExpressionStatement(expr)
 
     def expression(self) -> Expression:
-        return self.nullish_coalesce()
+        return self.assignment()
+
+    def assignment(self) -> Expression:
+        expr = self.nullish_coalesce()
+        if self.match(TokenType.ASSIGN):
+            value = self.assignment()
+            if isinstance(expr, (Identifier, Call, MemberAccess)):
+                return BinaryOp(expr, "=", value) # Simplified
+        return expr
 
     def nullish_coalesce(self) -> Expression:
-        expr = self.pipeline()
+        expr = self.logical_or()
         while self.match(TokenType.NULL_COALESCE):
+            op = self.tokens[self.pos-1].value
+            right = self.logical_or()
+            expr = BinaryOp(expr, op, right)
+        return expr
+
+    def logical_or(self) -> Expression:
+        expr = self.logical_and()
+        while self.match(TokenType.OR):
+            op = self.tokens[self.pos-1].value
+            right = self.logical_and()
+            expr = BinaryOp(expr, op, right)
+        return expr
+
+    def logical_and(self) -> Expression:
+        expr = self.pipeline()
+        while self.match(TokenType.AND):
             op = self.tokens[self.pos-1].value
             right = self.pipeline()
             expr = BinaryOp(expr, op, right)
         return expr
 
     def pipeline(self) -> Expression:
-        expr = self.assignment()
+        expr = self.equality()
         while self.match(TokenType.PIPELINE):
             right = self.call()
-            if not isinstance(right, Call):
-                 raise RuntimeError("Right side of pipeline must be a function call")
+            if not isinstance(right, (Call, Lambda)):
+                 raise RuntimeError("Right side of pipeline must be a function call or lambda")
             expr = Pipeline(expr, right)
-        return expr
-
-    def assignment(self) -> Expression:
-        expr = self.equality()
-        if self.match(TokenType.ASSIGN):
-            value = self.assignment()
-            if isinstance(expr, (Identifier, Call, MemberAccess)):
-                return BinaryOp(expr, "=", value) # Simplified
         return expr
 
     def equality(self) -> Expression:
@@ -343,15 +391,27 @@ class Parser:
                 self.consume(TokenType.RPAREN, "Expect ')' after arguments.")
                 expr = Call(expr, arguments)
             elif self.match(TokenType.DOT):
-                member = self.consume(TokenType.IDENTIFIER, "Expect member name.").value
-                # Special SQL-like handling for DataFrame
-                if member in ["select", "where"] and not self.check(TokenType.LPAREN):
-                     # Parse until end of statement or next keyword
-                     # This is a very simplified version
-                     arg = self.expression()
-                     expr = Call(MemberAccess(expr, member), [arg])
+                if self.match(TokenType.SELECT, TokenType.WHERE):
+                    member = self.tokens[self.pos-1].value
+                    # If it's a keyword but used as data.select val
+                    if not self.check(TokenType.LPAREN):
+                         arg = self.expression()
+                         if member == "select" and isinstance(arg, Identifier):
+                             arg = Literal(arg.name)
+                         expr = Call(MemberAccess(expr, member), [arg])
+                    else:
+                         expr = MemberAccess(expr, member)
                 else:
-                     expr = MemberAccess(expr, member)
+                    member = self.consume(TokenType.IDENTIFIER, "Expect member name.").value
+                    expr = MemberAccess(expr, member)
+            elif self.match(TokenType.SELECT):
+                arg = self.expression()
+                if isinstance(arg, Identifier):
+                    arg = Literal(arg.name)
+                expr = Call(MemberAccess(expr, "select"), [arg])
+            elif self.match(TokenType.WHERE):
+                arg = self.expression()
+                expr = Call(MemberAccess(expr, "where"), [arg])
             elif self.match(TokenType.LBRACKET):
                 # Support for dim labels: t["batch": 0]
                 index_expr = self.expression()
@@ -398,6 +458,8 @@ class Parser:
                 last_idx = match.end()
             parts.append(val[last_idx:])
             return TemplateLiteral(parts)
+        if self.match(TokenType.GPU):
+             return Identifier("gpu_context") # Mapping to a helper in stdlib
         if self.match(TokenType.NN):
              return NNBlock(self.block())
         if self.match(TokenType.GRADIENT):

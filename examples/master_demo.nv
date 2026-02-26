@@ -1,0 +1,96 @@
+import {
+    Tensor, DataFrame, train_loop, theme,
+    start_run, log_metric, get_device, gpu, gpu_context,
+    dim_index, relu, sigmoid, llm
+} from "src.nova.stdlib";
+
+// 1. Hardware Detection
+let device = get_device();
+print(`Running on device: ${device}`);
+
+// 2. Struct & Schema
+struct Config {
+    lr: Float;
+    epochs: Int;
+}
+schema TrainingSchema = { "lr": "float", "epochs": "int" };
+
+// 3. AI Model with nn block
+model NovaNet {
+    fn constructor() {
+        this.network = nn {
+            Linear(784, 128);
+            ReLU();
+            Linear(128, 10);
+        };
+    }
+
+    async fn forward(x) {
+        return await this.network(x);
+    }
+}
+
+fn main() {
+    // 4. Experiment Tracking
+    start_run("Master Demo");
+    log_metric("init", 1.0);
+
+    // 5. Data handling
+    let data = DataFrame({"val": [10, 20, null, 40, 20], "cat": ["A", "B", "A", "B", "A"]});
+    print("Original Data:");
+    print(data);
+
+    // 6. Clean primitive
+    clean data;
+    print("Cleaned Data:");
+    print(data);
+
+    // 7. SQL-like selectors
+    let subset = data.select("val").where(data.val > 15);
+    print("Subset:");
+    print(subset);
+
+    // 8. Pipeline operator
+    let result = 10 |> (x) => x * 2 |> (x) => x + 5;
+    print(`Pipeline result: ${result}`);
+
+    // 9. GPU Context
+    with (gpu(0)) {
+        print("Executing in GPU context...");
+    }
+
+    // 10. Parallel processing
+    parallel for (i in 0..3) {
+        print(`Parallel task ${i} complete`);
+    }
+
+    // 11. Plot primitive
+    theme("dark");
+    // plot data; // Skipping actual display to avoid blocking
+
+    // 12. Advanced AI constructs
+    let m = NovaNet();
+    let batch_data = Tensor.randn([32, 784]);
+    train m with batch_data {
+        epochs: 2
+    };
+
+    // 13. Null safety
+    let config = null;
+    let lr = config?.lr ?? 0.001;
+    print(`Learning rate: ${lr}`);
+
+    // 14. Pattern Matching
+    match (device) {
+        case "cuda" => print("Optimized for NVIDIA")
+        case "mps" => print("Optimized for Apple")
+        case _ => print("Standard CPU mode")
+    }
+
+    // 15. AI Prompt Execution
+    llm("Summarize this dataset");
+
+    print("Master Demo finished successfully!");
+}
+
+main();

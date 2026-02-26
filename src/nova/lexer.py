@@ -29,6 +29,14 @@ class TokenType(Enum):
     TRAIN = auto()
     LAZY = auto()
     WITH = auto()
+    AS = auto()
+    GPU = auto()
+    CLEAN = auto()
+    PLOT = auto()
+    LOCK = auto()
+    FMT = auto()
+    SELECT = auto()
+    WHERE = auto()
     NN = auto()
     GRADIENT = auto()
     WEIGHTS = auto()
@@ -119,6 +127,14 @@ class Lexer:
         "train": TokenType.TRAIN,
         "lazy": TokenType.LAZY,
         "with": TokenType.WITH,
+        "as": TokenType.AS,
+        "gpu": TokenType.GPU,
+        "clean": TokenType.CLEAN,
+        "plot": TokenType.PLOT,
+        "lock": TokenType.LOCK,
+        "fmt": TokenType.FMT,
+        "select": TokenType.SELECT,
+        "where": TokenType.WHERE,
         "nn": TokenType.NN,
         "gradient": TokenType.GRADIENT,
         "weights": TokenType.WEIGHTS,

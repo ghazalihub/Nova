@@ -18,6 +18,9 @@ class DataFrame:
     def avg_by(self, column):
         return DataFrame(self._df.groupby(column).mean())
 
+    def resample(self, rule):
+        return DataFrame(self._df.resample(rule).mean())
+
     def __getattr__(self, name):
         return getattr(self._df, name)
 

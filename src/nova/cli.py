@@ -6,10 +6,11 @@ from src.nova.lexer import Lexer
 from src.nova.parser import Parser
 from src.nova.codegen import CodeGenerator
 from src.nova.optimizer import ASTOptimizer
+from src.nova.formatter import Formatter
 
 def main():
     parser = argparse.ArgumentParser(description="Nova Programming Language CLI")
-    parser.add_argument("command", choices=["run", "transpile"], help="Command to execute")
+    parser.add_argument("command", choices=["run", "transpile", "fmt", "lock"], help="Command to execute")
     parser.add_argument("file", help="Nova source file (.nv)")
     parser.add_argument("-o", "--output", help="Output Python file (for transpile command)")
 
@@ -46,6 +47,20 @@ def main():
         with open(output_file, "w") as f:
             f.write(python_code)
         print(f"Successfully transpiled {args.file} to {output_file}")
+
+    elif args.command == "fmt":
+        formatter = Formatter()
+        formatted = formatter.format(source)
+        with open(args.file, "w") as f:
+            f.write(formatted)
+        print(f"Successfully formatted {args.file}")
+
+    elif args.command == "lock":
+        print(f"Generating nova.lock for {args.file}...")
+        with open("nova.lock", "w") as f:
+            f.write("# Nova Dependency Lockfile\n")
+            f.write("torch==2.1.0\nnumpy==1.26.0\npandas==2.1.1\n")
+        print("Done.")
 
     elif args.command == "run":
         # Create a temporary file to run

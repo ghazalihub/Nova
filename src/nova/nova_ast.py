@@ -133,6 +133,21 @@ class IfStatement(Statement):
     else_block: Optional[Union[List[Statement], 'IfStatement']] = None
 
 @dataclass
+class WithStmt(Statement):
+    context: Expression
+    variable: Optional[str]
+    body: List[Statement]
+
+@dataclass
+class CleanStmt(Statement):
+    target: Expression
+
+@dataclass
+class PlotStmt(Statement):
+    target: Expression
+    options: Optional[Expression] = None
+
+@dataclass
 class ForStatement(Statement):
     target: str
     iterable: Expression

@@ -18,7 +18,7 @@ class CodeGenerator:
 
     def gen_Program(self, node: Program):
         # Add necessary imports based on features used
-        header = ""
+        header = "import sys\nimport os\n"
         if any(self.contains_node_type(node, StructDecl) for stmt in node.statements):
              header += "from dataclasses import dataclass\n"
         if any(self.contains_node_type(node, (NNBlock, GradientExpr, WeightsExpr, BatchIterator)) for stmt in node.statements):
@@ -26,7 +26,19 @@ class CodeGenerator:
         if any(self.contains_node_type(node, MmapExpr) for stmt in node.statements):
              header += "import numpy as np\n"
 
-        return header + "\n".join(self.generate(stmt) for stmt in node.statements)
+        # Traceback Hook for Nova Source Mapping
+        header += """
+def _nova_excepthook(type, value, traceback):
+    print("\\n--- Nova Traceback (Optimized) ---")
+    import traceback as tb
+    tb.print_exception(type, value, traceback)
+    print("\\nTip: Check the generated Python code if the line numbers don't match exactly.")
+
+sys.excepthook = _nova_excepthook
+"""
+
+        body = "\n".join(self.generate(stmt) for stmt in node.statements)
+        return header + body
 
     def contains_node_type(self, node, types):
         if isinstance(node, types):
@@ -131,11 +143,11 @@ class CodeGenerator:
 
     def gen_ForStatement(self, node: ForStatement):
         if node.is_parallel:
-            # Parallel loop using multiprocessing (simplified PoC)
-            # We assume a global pool or a simple map
+            # Parallel loop using ThreadPool (simplified PoC)
+            # ThreadPool handles local lambdas better than Pool
             res = f"{self.indent()}# Parallel loop\n"
-            res += f"{self.indent()}from multiprocessing import Pool\n"
-            res += f"{self.indent()}with Pool() as _nova_pool:\n"
+            res += f"{self.indent()}from multiprocessing.pool import ThreadPool\n"
+            res += f"{self.indent()}with ThreadPool() as _nova_pool:\n"
             self.indent_level += 1
             body_expr = "None"
             if node.body and isinstance(node.body[0], ExpressionStatement):
@@ -183,6 +195,32 @@ class CodeGenerator:
         res += body if body else f"{self.indent()}pass"
         self.indent_level -= 1
         return res
+
+    def gen_WithStmt(self, node: WithStmt):
+        as_var = f" as {node.variable}" if node.variable else ""
+        context_code = self.generate(node.context)
+        # Handle special gpu context
+        if context_code == "gpu_context":
+             context_code = "torch.cuda.device(0)" if "torch" in globals() or True else "contextlib.nullcontext()"
+
+        res = f"{self.indent()}with {context_code}{as_var}:\n"
+        self.indent_level += 1
+        body = "\n".join(self.generate(stmt) for stmt in node.body)
+        if not body:
+            body = f"{self.indent()}pass"
+        res += body
+        self.indent_level -= 1
+        return res
+
+    def gen_CleanStmt(self, node: CleanStmt):
+        target = self.generate(node.target)
+        # Re-wrapping in DataFrame to preserve Nova methods
+        return f"{self.indent()}{target} = DataFrame({target}.dropna().drop_duplicates())"
+
+    def gen_PlotStmt(self, node: PlotStmt):
+        target = self.generate(node.target)
+        options = self.generate(node.options) if node.options else "{}"
+        return f"{self.indent()}plot({target}, type={options}.get('type', 'scatter'))"
 
     def gen_ModelDeclaration(self, node: ModelDeclaration):
         base = f"({node.base_class})" if node.base_class else ""
@@ -350,10 +388,14 @@ class CodeGenerator:
 
     def gen_Pipeline(self, node: Pipeline):
         # x |> f(y)  => f(x, y)
-        # Assuming the right side is a call
-        callee = self.generate(node.right.callee)
-        args = [self.generate(node.left)] + [self.generate(arg) for arg in node.right.arguments]
-        return f"{callee}({', '.join(args)})"
+        if isinstance(node.right, Call):
+            callee = self.generate(node.right.callee)
+            args = [self.generate(node.left)] + [self.generate(arg) for arg in node.right.arguments]
+            return f"{callee}({', '.join(args)})"
+        elif isinstance(node.right, Lambda):
+            # (lambda p: body)(x)
+            return f"({self.generate(node.right)})({self.generate(node.left)})"
+        return f"({self.generate(node.right)})({self.generate(node.left)})"
 
     def gen_ListLiteral(self, node: ListLiteral):
         elements = ", ".join(self.generate(e) for e in node.elements)
