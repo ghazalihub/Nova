@@ -1,0 +1,11 @@
+fn double(n) {
+    return n * 2;
+}
+
+fn increment(n) {
+    return n + 1;
+}
+
+let result = 5 |> double() |> increment();
+print("Pipeline result:");
+print(result); // Expected 11

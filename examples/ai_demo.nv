@@ -1,0 +1,19 @@
+import { Tensor, DataFrame } from "src.nova.stdlib";
+
+fn demo() {
+    let t = Tensor([1, 2, 3]);
+    print("Tensor:");
+    print(t);
+
+    let df = DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]});
+    print("DataFrame:");
+    print(df);
+
+    // Safe navigation demo
+    let obj = null;
+    let val = obj?.property;
+    print("Safe navigation on null:");
+    print(val); // Should be None
+}
+
+demo();
