@@ -53,6 +53,10 @@ class ListLiteral(Expression):
     elements: List[Expression]
 
 @dataclass
+class TemplateLiteral(Expression):
+    parts: List[Union[str, Expression]]
+
+@dataclass
 class DictLiteral(Expression):
     keys: List[Expression]
     values: List[Expression]
@@ -73,6 +77,13 @@ class VarDeclaration(Statement):
     type_hint: Optional[str]
     value: Expression
     is_const: bool = False
+    is_lazy: bool = False
+
+@dataclass
+class TrainStatement(Statement):
+    model: Expression
+    dataset: Expression
+    options: Optional[Expression] = None
 
 @dataclass
 class FunctionDeclaration(Statement):

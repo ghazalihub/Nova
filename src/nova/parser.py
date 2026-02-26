@@ -41,7 +41,16 @@ class Parser:
         if self.match(TokenType.IMPORT):
             return self.import_statement()
         if self.match(TokenType.LET, TokenType.CONST):
-            return self.var_declaration(self.tokens[self.pos-1].type == TokenType.CONST)
+            return self.var_declaration(self.tokens[self.pos-1].type == TokenType.CONST, is_lazy=False)
+        if self.match(TokenType.LAZY):
+            if self.match(TokenType.LET):
+                return self.var_declaration(is_const=False, is_lazy=True)
+            elif self.match(TokenType.CONST):
+                return self.var_declaration(is_const=True, is_lazy=True)
+            else:
+                raise RuntimeError("Expect 'let' or 'const' after 'lazy'")
+        if self.match(TokenType.TRAIN):
+            return self.train_statement()
         if self.match(TokenType.FN):
             return self.function_declaration()
         if self.match(TokenType.IF):
@@ -79,7 +88,7 @@ class Parser:
         self.match(TokenType.SEMICOLON)
         return ImportStatement(names, source)
 
-    def var_declaration(self, is_const: bool) -> VarDeclaration:
+    def var_declaration(self, is_const: bool, is_lazy: bool) -> VarDeclaration:
         name = self.consume(TokenType.IDENTIFIER, "Expect variable name.").value
         type_hint = None
         if self.match(TokenType.COLON):
@@ -87,7 +96,18 @@ class Parser:
         self.consume(TokenType.ASSIGN, "Expect '=' after variable name.")
         value = self.expression()
         self.match(TokenType.SEMICOLON)
-        return VarDeclaration(name, type_hint, value, is_const)
+        return VarDeclaration(name, type_hint, value, is_const, is_lazy)
+
+    def train_statement(self) -> TrainStatement:
+        model = self.expression()
+        self.consume(TokenType.WITH, "Expect 'with' after model in train statement.") # Wait, I didn't add WITH keyword!
+        dataset = self.expression()
+        options = None
+        if self.match(TokenType.LBRACE):
+            self.pos -= 1 # backtrack to parse as dict literal
+            options = self.expression()
+        self.match(TokenType.SEMICOLON)
+        return TrainStatement(model, dataset, options)
 
     def function_declaration(self) -> FunctionDeclaration:
         name = self.consume(TokenType.IDENTIFIER, "Expect function name.").value
@@ -204,7 +224,15 @@ class Parser:
         return ExpressionStatement(expr)
 
     def expression(self) -> Expression:
-        return self.pipeline()
+        return self.nullish_coalesce()
+
+    def nullish_coalesce(self) -> Expression:
+        expr = self.pipeline()
+        while self.match(TokenType.NULL_COALESCE):
+            op = self.tokens[self.pos-1].value
+            right = self.pipeline()
+            expr = BinaryOp(expr, op, right)
+        return expr
 
     def pipeline(self) -> Expression:
         expr = self.assignment()
@@ -233,7 +261,7 @@ class Parser:
 
     def comparison(self) -> Expression:
         expr = self.term()
-        while self.match(TokenType.LT, TokenType.GT, TokenType.LE, TokenType.GE):
+        while self.match(TokenType.LT, TokenType.GT, TokenType.LE, TokenType.GE, TokenType.RANGE):
             op = self.tokens[self.pos-1].value
             right = self.term()
             expr = BinaryOp(expr, op, right)
@@ -276,7 +304,25 @@ class Parser:
                 expr = Call(expr, arguments)
             elif self.match(TokenType.DOT):
                 member = self.consume(TokenType.IDENTIFIER, "Expect member name.").value
-                expr = MemberAccess(expr, member)
+                # Special SQL-like handling for DataFrame
+                if member in ["select", "where"] and not self.check(TokenType.LPAREN):
+                     # Parse until end of statement or next keyword
+                     # This is a very simplified version
+                     arg = self.expression()
+                     expr = Call(MemberAccess(expr, member), [arg])
+                else:
+                     expr = MemberAccess(expr, member)
+            elif self.match(TokenType.LBRACKET):
+                # Support for dim labels: t["batch": 0]
+                index_expr = self.expression()
+                if self.match(TokenType.COLON):
+                    value = self.expression()
+                    # We can represent this as a special Call to a helper
+                    expr = Call(Identifier("dim_index"), [expr, index_expr, value])
+                else:
+                    # Normal indexing
+                    expr = Call(MemberAccess(expr, "__getitem__"), [index_expr])
+                self.consume(TokenType.RBRACKET, "Expect ']' after index.")
             elif self.match(TokenType.SAFE_NAV):
                 member = self.consume(TokenType.IDENTIFIER, "Expect member name.").value
                 expr = MemberAccess(expr, member, is_safe=True)
@@ -295,6 +341,11 @@ class Parser:
             return Literal(float(self.tokens[self.pos-1].value))
         if self.match(TokenType.STRING):
             return Literal(self.tokens[self.pos-1].value)
+        if self.match(TokenType.TEMPLATE_STRING):
+            val = self.tokens[self.pos-1].value
+            # Basic conversion of ${var} to {var} for Python f-strings
+            val = val.replace("${", "{")
+            return TemplateLiteral([val])
         if self.match(TokenType.IDENTIFIER):
             return Identifier(self.tokens[self.pos-1].value)
         if self.match(TokenType.LPAREN):

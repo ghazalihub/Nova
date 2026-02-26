@@ -26,7 +26,13 @@ class CodeGenerator:
         # Python doesn't have const at runtime in the same way, so we just generate assignment
         # We can add type hints if provided
         type_hint = f": {node.type_hint}" if node.type_hint else ""
+        if node.is_lazy:
+            return f"{self.indent()}{node.name}{type_hint} = LazyProxy(lambda: {self.generate(node.value)})"
         return f"{self.indent()}{node.name}{type_hint} = {self.generate(node.value)}"
+
+    def gen_TrainStatement(self, node: TrainStatement):
+        options = self.generate(node.options) if node.options else "None"
+        return f"{self.indent()}train_loop({self.generate(node.model)}, {self.generate(node.dataset)}, {options})"
 
     def gen_FunctionDeclaration(self, node: FunctionDeclaration):
         async_prefix = "async " if node.is_async else ""
@@ -163,6 +169,12 @@ class CodeGenerator:
     def gen_BinaryOp(self, node: BinaryOp):
         if node.op == "=":
             return f"{self.generate(node.left)} = {self.generate(node.right)}"
+        if node.op == "??":
+            l = self.generate(node.left)
+            r = self.generate(node.right)
+            return f"({l} if {l} is not None else {r})"
+        if node.op == "..":
+            return f"range({self.generate(node.left)}, {self.generate(node.right)})"
         op_map = {"&&": "and", "||": "or", "!": "not "}
         op = op_map.get(node.op, node.op)
         return f"({self.generate(node.left)} {op} {self.generate(node.right)})"
@@ -191,6 +203,16 @@ class CodeGenerator:
             return "None"
         return str(node.value)
 
+    def gen_TemplateLiteral(self, node: TemplateLiteral):
+        # Simplistic f-string generation
+        parts = []
+        for p in node.parts:
+            if isinstance(p, str):
+                parts.append(p)
+            else:
+                parts.append("{" + self.generate(p) + "}")
+        return f'f"{"".join(parts)}"'
+
     def gen_Pipeline(self, node: Pipeline):
         # x |> f(y)  => f(x, y)
         # Assuming the right side is a call
@@ -205,7 +227,10 @@ class CodeGenerator:
     def gen_DictLiteral(self, node: DictLiteral):
         items = []
         for k, v in zip(node.keys, node.values):
-            items.append(f"{self.generate(k)}: {self.generate(v)}")
+            key_code = self.generate(k)
+            if isinstance(k, Identifier):
+                key_code = f'"{key_code}"'
+            items.append(f"{key_code}: {self.generate(v)}")
         return "{" + ", ".join(items) + "}"
 
     def gen_List(self, node: list):

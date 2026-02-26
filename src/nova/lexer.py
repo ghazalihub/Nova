@@ -28,12 +28,14 @@ class TokenType(Enum):
     CASE = auto()
     TRAIN = auto()
     LAZY = auto()
+    WITH = auto()
 
     # Literals
     IDENTIFIER = auto()
     INTEGER = auto()
     FLOAT = auto()
     STRING = auto()
+    TEMPLATE_STRING = auto()
     BOOLEAN = auto()
     NULL = auto()
 
@@ -107,6 +109,7 @@ class Lexer:
         "case": TokenType.CASE,
         "train": TokenType.TRAIN,
         "lazy": TokenType.LAZY,
+        "with": TokenType.WITH,
         "true": TokenType.BOOLEAN,
         "false": TokenType.BOOLEAN,
         "null": TokenType.NULL,
@@ -116,6 +119,7 @@ class Lexer:
         ('FLOAT',     r'\d+\.\d+'),
         ('INTEGER',   r'\d+'),
         ('STRING',    r'"[^"]*"'),
+        ('TEMPLATE_STRING', r'`[^`]*`'),
         ('SAFE_NAV',  r'\?\.'),
         ('NULL_COALESCE', r'\?\?'),
         ('PIPELINE',  r'\|>'),
@@ -172,6 +176,8 @@ class Lexer:
                 self.tokens.append(Token(TokenType.INTEGER, value, self.line, column))
             elif kind == 'STRING':
                 self.tokens.append(Token(TokenType.STRING, value[1:-1], self.line, column))
+            elif kind == 'TEMPLATE_STRING':
+                self.tokens.append(Token(TokenType.TEMPLATE_STRING, value[1:-1], self.line, column))
             elif kind == 'IDENTIFIER':
                 type = self.KEYWORDS.get(value, TokenType.IDENTIFIER)
                 self.tokens.append(Token(type, value, self.line, column))

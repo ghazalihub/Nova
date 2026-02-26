@@ -1,0 +1,45 @@
+import { Tensor, DataFrame, train_loop, LazyProxy, dim_index } from "src.nova.stdlib";
+
+fn main() {
+    // 1. Template Literals & Lazy Variables
+    let name = "Nova";
+    let version = 1.0;
+    print(`Welcome to ${name} v${version}`);
+
+    lazy let expensive_data = Tensor.randn([100, 100]);
+    print("Lazy data defined (but not yet computed)");
+
+    // 2. Range & Parallel For
+    print("Parallel processing demo:");
+    parallel for (i in 0..5) {
+        print(`Processing item ${i}`);
+    }
+
+    // 3. Nullish Coalescing & Safe Navigation
+    let config = null;
+    let timeout = config?.timeout ?? 30;
+    print(`Timeout set to: ${timeout}`);
+
+    // 4. SQL-like DataFrame Selectors
+    let df = DataFrame({"age": [20, 30, 40], "score": [85, 90, 95]});
+    let filtered = df.where df.age > 25;
+    print("Filtered DataFrame (age > 25):");
+    print(filtered);
+
+    // 5. Training Statement
+    model MyAI {
+        fn forward(x) {
+            return x * 2;
+        }
+    }
+    let my_model = MyAI();
+    train my_model with filtered {
+        epochs: 3
+    };
+
+    // 6. Dimension Labeling
+    let t = Tensor.randn([3, 4]);
+    let batch = t["batch": 0];
+}
+
+main();
