@@ -53,6 +53,11 @@ class TokenType(Enum):
     SECURE = auto()
     SHARED = auto()
     STATE = auto()
+    AVG_BY = auto()
+    DATASET = auto()
+    DEPLOY = auto()
+    TAINT = auto()
+    FREEZE = auto()
     AT = auto() # @
 
     # Literals
@@ -160,6 +165,11 @@ class Lexer:
         "secure": TokenType.SECURE,
         "shared": TokenType.SHARED,
         "state": TokenType.STATE,
+        "avg_by": TokenType.AVG_BY,
+        "dataset": TokenType.DATASET,
+        "deploy": TokenType.DEPLOY,
+        "taint": TokenType.TAINT,
+        "freeze": TokenType.FREEZE,
         "true": TokenType.BOOLEAN,
         "false": TokenType.BOOLEAN,
         "null": TokenType.NULL,

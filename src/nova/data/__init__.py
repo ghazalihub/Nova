@@ -15,8 +15,8 @@ class DataFrame:
     def select(self, *columns):
         return DataFrame(self._df[list(columns)])
 
-    def avg_by(self, column):
-        return DataFrame(self._df.groupby(column).mean())
+    def avg_by(self, column, group_by):
+        return DataFrame(self._df.groupby(group_by)[column].mean())
 
     def resample(self, rule):
         return DataFrame(self._df.resample(rule).mean())
@@ -39,4 +39,12 @@ class DataFrame:
     def __repr__(self):
         return repr(self._df)
 
-__all__ = ["DataFrame"]
+class Dataset:
+    def __init__(self, source, schema=None):
+        self.source = source
+        self.schema = schema
+
+    def __repr__(self):
+        return f"Dataset(source={self.source}, schema={self.schema})"
+
+__all__ = ["DataFrame", "Dataset"]

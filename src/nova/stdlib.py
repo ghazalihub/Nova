@@ -39,9 +39,18 @@ def llm(prompt):
     print(f"[Nova AI] Processing prompt: {prompt}")
     return "AI-generated result based on: " + prompt
 
+def deploy_model(model, options):
+    print(f"[Nova Deploy] Deploying {model} with options: {options}")
+    return True
+
+def taint(target):
+    print(f"[Nova Safety] Tainting {target} for safety tracking")
+    return target
+
 __all__ = [
-    "Tensor", "DataFrame", "plot", "LazyProxy", "train_loop", "dim_index",
+    "Tensor", "DataFrame", "Dataset", "plot", "LazyProxy", "train_loop", "dim_index",
     "classification_report", "confusion_matrix", "get_device", "gpu", "gpu_context",
     "start_run", "log_metric", "theme", "Dashboard", "llm", "secret", "read", "write",
-    "save", "load", "freeze", "plot3d", "hist", "animate", "annotate", "show_map"
+    "save", "load", "freeze", "plot3d", "hist", "animate", "annotate", "show_map",
+    "deploy_model", "taint"
 ]

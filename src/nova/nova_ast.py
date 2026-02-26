@@ -73,6 +73,7 @@ class GradientExpr(Expression):
 @dataclass
 class WeightsExpr(Expression):
     shape: Expression
+    shared: bool = False
 
 @dataclass
 class MmapExpr(Expression):
@@ -115,6 +116,33 @@ class ModelDeclaration(Statement):
     name: str
     base_class: Optional[str]
     members: List[Statement]
+    version: Optional[str] = None
+
+@dataclass
+class DatasetDecl(Statement):
+    name: str
+    source: Expression
+    schema: Optional[Expression] = None
+
+@dataclass
+class DeployStmt(Statement):
+    target: Expression
+    options: Optional[Expression] = None
+
+@dataclass
+class TaintStmt(Statement):
+    target: Expression
+
+@dataclass
+class FreezeStmt(Statement):
+    target: Expression
+    layer: Optional[Expression] = None
+
+@dataclass
+class AvgByStmt(Expression): # Used in select expressions
+    dataset: Expression
+    column: str
+    group_by: str
 
 @dataclass
 class StructDecl(Statement):

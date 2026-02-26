@@ -77,6 +77,14 @@ class Parser:
             return self.for_statement(is_parallel=True)
         if self.match(TokenType.MODEL):
             return self.model_declaration()
+        if self.match(TokenType.DATASET):
+            return self.dataset_declaration()
+        if self.match(TokenType.DEPLOY):
+            return self.deploy_statement()
+        if self.match(TokenType.TAINT):
+            return self.taint_statement()
+        if self.match(TokenType.FREEZE):
+            return self.freeze_statement()
         if self.match(TokenType.STRUCT):
             return self.struct_declaration()
         if self.match(TokenType.SCHEMA):
@@ -274,12 +282,49 @@ class Parser:
         if self.match(TokenType.LPAREN):
             base_class = self.consume(TokenType.IDENTIFIER, "Expect base class name.").value
             self.consume(TokenType.RPAREN, "Expect ')' after base class.")
+
+        version = None
+        if self.match(TokenType.AT):
+            version = self.consume(TokenType.STRING, "Expect version string after '@'.").value
+
         self.consume(TokenType.LBRACE, "Expect '{' before model body.")
         members = []
         while not self.check(TokenType.RBRACE) and not self.check(TokenType.EOF):
             members.append(self.statement())
         self.consume(TokenType.RBRACE, "Expect '}' after model body.")
-        return ModelDeclaration(name, base_class, members)
+        return ModelDeclaration(name, base_class, members, version)
+
+    def dataset_declaration(self) -> DatasetDecl:
+        name = self.consume(TokenType.IDENTIFIER, "Expect dataset name.").value
+        self.consume(TokenType.ASSIGN, "Expect '=' after dataset name.")
+        source = self.expression()
+        schema = None
+        if self.match(TokenType.SCHEMA):
+            schema = self.expression()
+        self.match(TokenType.SEMICOLON)
+        return DatasetDecl(name, source, schema)
+
+    def deploy_statement(self) -> DeployStmt:
+        target = self.expression()
+        options = None
+        if self.match(TokenType.LBRACE):
+            self.pos -= 1
+            options = self.expression()
+        self.match(TokenType.SEMICOLON)
+        return DeployStmt(target, options)
+
+    def taint_statement(self) -> TaintStmt:
+        target = self.expression()
+        self.match(TokenType.SEMICOLON)
+        return TaintStmt(target)
+
+    def freeze_statement(self) -> FreezeStmt:
+        target = self.expression()
+        layer = None
+        if not self.check(TokenType.SEMICOLON):
+             layer = self.expression()
+        self.match(TokenType.SEMICOLON)
+        return FreezeStmt(target, layer)
 
     def match_statement(self) -> MatchStatement:
         self.consume(TokenType.LPAREN, "Expect '(' after 'match'.")
@@ -442,14 +487,24 @@ class Parser:
                 self.consume(TokenType.RPAREN, "Expect ')' after arguments.")
                 expr = Call(expr, arguments)
             elif self.match(TokenType.DOT):
-                if self.match(TokenType.SELECT, TokenType.WHERE):
+                if self.match(TokenType.SELECT, TokenType.WHERE, TokenType.AVG_BY):
                     member = self.tokens[self.pos-1].value
                     # If it's a keyword but used as data.select val
                     if not self.check(TokenType.LPAREN):
                          arg = self.expression()
                          if member == "select" and isinstance(arg, Identifier):
                              arg = Literal(arg.name)
-                         expr = Call(MemberAccess(expr, member), [arg])
+
+                         if member == "avg_by":
+                             # Expect two args: data.avg_by price category
+                             group_by = self.expression()
+                             if isinstance(arg, Identifier): arg = Literal(arg.name)
+                             if isinstance(group_by, Identifier): group_by = Literal(group_by.name)
+                             expr = AvgByStmt(expr, arg.value if hasattr(arg, 'value') else str(arg), group_by.value if hasattr(group_by, 'value') else str(group_by))
+                             # Note: This returns an AvgByStmt which might need to be wrapped if it's not a direct call
+                             # But for now let's assume it's part of a pipeline or similar
+                         else:
+                             expr = Call(MemberAccess(expr, member), [arg])
                     else:
                          expr = MemberAccess(expr, member)
                 else:
@@ -527,8 +582,13 @@ class Parser:
         if self.match(TokenType.WEIGHTS):
              self.consume(TokenType.LPAREN, "Expect '(' after weights.")
              shape = self.expression()
-             self.consume(TokenType.RPAREN, "Expect ')' after weights shape.")
-             return WeightsExpr(shape)
+             shared = False
+             if self.match(TokenType.COMMA):
+                  self.consume(TokenType.SHARED, "Expect 'shared' parameter.")
+                  self.consume(TokenType.ASSIGN, "Expect '='.")
+                  shared = (self.consume(TokenType.BOOLEAN, "Expect boolean.").value == "true")
+             self.consume(TokenType.RPAREN, "Expect ')' after weights args.")
+             return WeightsExpr(shape, shared)
         if self.match(TokenType.BATCH):
              self.consume(TokenType.LPAREN, "Expect '(' after batch.")
              data = self.expression()

@@ -24,6 +24,16 @@ class CodeGenerator:
              header += "from dataclasses import dataclass\n"
         if any(self.contains_node_type(node, (NNBlock, GradientExpr, WeightsExpr, BatchIterator)) for stmt in node.statements):
              header += "import torch\nfrom torch.utils.data import DataLoader\n"
+
+        # Auto-imports for new keywords
+        if any(self.contains_node_type(node, DatasetDecl) for stmt in node.statements):
+             header += "from src.nova.data import Dataset\n"
+        if any(self.contains_node_type(node, DeployStmt) for stmt in node.statements):
+             header += "from src.nova.stdlib import deploy_model\n"
+        if any(self.contains_node_type(node, TaintStmt) for stmt in node.statements):
+             header += "from src.nova.stdlib import taint\n"
+        if any(self.contains_node_type(node, FreezeStmt) for stmt in node.statements):
+             header += "from src.nova.stdlib import freeze\n"
         if any(self.contains_node_type(node, MmapExpr) for stmt in node.statements):
              header += "import numpy as np\n"
         if any(self.contains_node_type(node, TestStmt) for stmt in node.statements):
@@ -99,9 +109,6 @@ sys.excepthook = _nova_excepthook
         if self.in_class_context and self.in_class_context[-1]:
              params.append("self")
 
-        # Nested functions should NOT have self injected unless they are inside a nested class
-        self.in_class_context.append(False) # Entering function body context
-
         for p in node.parameters:
             p_str = p['name']
             if p.get('type'):
@@ -113,13 +120,23 @@ sys.excepthook = _nova_excepthook
             header += f" -> {self.map_type(node.return_type)}"
         header += ":"
 
+        # Determine if we need to inject super().__init__()
+        is_constructor = (node.name == "__init__" and self.in_class_context and self.in_class_context[-1])
+
         self.indent_level += 1
-        body = "\n".join(self.generate(stmt) for stmt in node.body)
+        self.in_class_context.append(False) # Entering function body context
+
+        body_parts = []
+        if is_constructor:
+             body_parts.append(f"{self.indent()}super().__init__()")
+
+        body_parts.extend([self.generate(stmt) for stmt in node.body])
+        body = "\n".join(body_parts)
         if not body:
             body = f"{self.indent()}pass"
-        self.indent_level -= 1
 
         self.in_class_context.pop()
+        self.indent_level -= 1
         return f"{header}\n{body}"
 
     def gen_IfStatement(self, node: IfStatement):
@@ -294,9 +311,11 @@ sys.excepthook = _nova_excepthook
         return f"{self.indent()}plot({target}, type={options}.get('type', 'scatter'))"
 
     def gen_ModelDeclaration(self, node: ModelDeclaration):
-        base = f"({node.base_class})" if node.base_class else ""
-        res = f"{self.indent()}class {node.name}{base}:\n"
+        base_cls = node.base_class if node.base_class else "torch.nn.Module"
+        res = f"{self.indent()}class {node.name}({base_cls}):\n"
         self.indent_level += 1
+        if node.version:
+            res += f"{self.indent()}_version = \"{node.version}\"\n"
         self.in_class_context.append(True)
         body = "\n".join(self.generate(stmt) for stmt in node.members)
         if not body:
@@ -305,6 +324,24 @@ sys.excepthook = _nova_excepthook
         self.in_class_context.pop()
         self.indent_level -= 1
         return res
+
+    def gen_DatasetDecl(self, node: DatasetDecl):
+        schema = f", schema={self.generate(node.schema)}" if node.schema else ""
+        return f"{self.indent()}{node.name} = Dataset({self.generate(node.source)}{schema})"
+
+    def gen_DeployStmt(self, node: DeployStmt):
+        options = self.generate(node.options) if node.options else "{}"
+        return f"{self.indent()}deploy_model({self.generate(node.target)}, {options})"
+
+    def gen_TaintStmt(self, node: TaintStmt):
+        return f"{self.indent()}taint({self.generate(node.target)})"
+
+    def gen_FreezeStmt(self, node: FreezeStmt):
+        layer = f", {self.generate(node.layer)}" if node.layer else ""
+        return f"{self.indent()}freeze({self.generate(node.target)}{layer})"
+
+    def gen_AvgByStmt(self, node: AvgByStmt):
+        return f"{self.generate(node.dataset)}.avg_by(\"{node.column}\", \"{node.group_by}\")"
 
     def gen_MatchStatement(self, node: MatchStatement):
         # Transpiling to Python 3.10 match statement
@@ -438,7 +475,10 @@ sys.excepthook = _nova_excepthook
         return f"torch.autograd.grad({self.generate(node.function)}, [{vars}])"
 
     def gen_WeightsExpr(self, node: WeightsExpr):
-        return f"torch.randn({self.generate(node.shape)}, requires_grad=True)"
+        code = f"torch.randn({self.generate(node.shape)}, requires_grad=True)"
+        if node.shared:
+             code += ".share_memory_()"
+        return code
 
     def gen_BatchIterator(self, node: BatchIterator):
         return f"DataLoader({self.generate(node.dataset)}, batch_size={self.generate(node.size)})"

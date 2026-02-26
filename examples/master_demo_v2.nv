@@ -27,14 +27,15 @@ secure {
     let sensitive_data = read("s3://bucket/data.bin");
 }
 
-// 5. Advanced Model with Decorators
-model DeepNova {
+// 5. Advanced Model with Versioning
+model DeepNova @ "v2.0" {
     fn constructor() {
         this.layers = nn {
             Linear(100, 50);
             ReLU();
             Linear(50, 10);
         };
+        this.w = weights([10, 10], shared=true);
     }
 
     async fn forward(x) {
@@ -46,9 +47,16 @@ fn main() {
     start_run("Master Demo v2");
 
     // 6. SQL-like selectors on time-series
-    let df = DataFrame({"val": [1, 2, 3, 4, 5]});
+    let df = DataFrame({
+        "val": [1, 2, 3, 4, 5],
+        "category": ["A", "A", "B", "B", "A"]
+    });
     print("Data:");
     print(df);
+
+    let grouped = df.avg_by val category;
+    print("Grouped Average:");
+    print(grouped);
 
     // 7. Auto-Vectorization & Parallelism
     let a = Tensor.randn([10]);
@@ -78,6 +86,11 @@ fn main() {
     // 11. LLM Integration
     let summary = llm(SummaryPrompt);
     print(summary);
+
+    // 12. Dataset & Deployment & Safety
+    dataset raw_data = "s3://bucket/data.parquet" schema "NovaSchema";
+    taint apiKey;
+    deploy m { port: 8080 };
 
     print("--- ALL 110+ FEATURES VERIFIED ---");
 }

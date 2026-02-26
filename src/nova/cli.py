@@ -31,9 +31,11 @@ def main():
         sys.exit(1)
 
     # 0. AI Comment Processing
-    import re
-    source = re.sub(r'/\* @ai: generate (.*?) \*/', r'// AI Generated code for: \1\nprint("AI Generated code placeholder");', source)
-    source = re.sub(r'/\* @ai: optimize \*/', r'// AI Optimization suggested', source)
+    original_source = source
+    if args.command != "fmt":
+        import re
+        source = re.sub(r'/\* @ai: generate (.*?) \*/', r'// AI Generated code for: \1\nprint("AI Generated code placeholder");', source)
+        source = re.sub(r'/\* @ai: optimize \*/', r'// AI Optimization suggested', source)
 
     # 1. Lex
     lexer = Lexer(source)
@@ -59,7 +61,7 @@ def main():
 
     elif args.command == "fmt":
         formatter = Formatter()
-        formatted = formatter.format(source)
+        formatted = formatter.format(original_source)
         with open(args.file, "w") as f:
             f.write(formatted)
         print(f"Successfully formatted {args.file}")
@@ -110,9 +112,10 @@ def main():
 
     elif args.command == "run":
         # Create a temporary file to run
-        temp_file = ".nova_temp.py"
-        with open(temp_file, "w") as f:
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(python_code)
+            temp_file = f.name
 
         try:
             subprocess.run([sys.executable, temp_file], check=True)
