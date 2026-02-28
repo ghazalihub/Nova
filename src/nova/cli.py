@@ -13,7 +13,8 @@ def main():
     parser.add_argument("command", choices=[
         "run", "transpile", "fmt", "lock", "lsp", "lint", "check",
         "doc", "profile", "debug", "test", "coverage", "bench",
-        "repl", "init", "sync-docs", "audit", "dockerize", "k8s"
+        "repl", "init", "sync-docs", "audit", "dockerize", "k8s",
+        "install", "build"
     ], help="Command to execute")
     parser.add_argument("file", nargs='?', help="Nova source file (.nv)")
     parser.add_argument("-o", "--output", help="Output Python file (for transpile command)")
@@ -75,6 +76,32 @@ def main():
 
     elif args.command == "lsp":
         print("Starting Nova LSP server...")
+        import json
+        while True:
+            try:
+                line = sys.stdin.readline()
+                if not line: break
+                if line.startswith("Content-Length:"):
+                    length = int(line.split(":")[1].strip())
+                    sys.stdin.readline() # Consume \r\n
+                    content = sys.stdin.read(length)
+                    request = json.loads(content)
+                    # Naive response for initialization
+                    if request.get("method") == "initialize":
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "result": {
+                                "capabilities": {
+                                    "textDocumentSync": 1,
+                                    "completionProvider": {"resolveProvider": True}
+                                }
+                            }
+                        }
+                        res_json = json.dumps(response)
+                        print(f"Content-Length: {len(res_json)}\r\n\r\n{res_json}", end="", flush=True)
+            except EOFError:
+                break
     elif args.command == "lint":
         print("Linting Nova code...")
         print("All clear.")
@@ -109,6 +136,28 @@ def main():
         print("Generating optimized Dockerfile for AI...")
     elif args.command == "k8s":
         print("Generating Kubernetes manifests...")
+
+    elif args.command == "install":
+        print(f"Installing {args.file}...")
+        subprocess.run([sys.executable, "-m", "pip", "install", args.file])
+
+    elif args.command == "build":
+        print(f"Building project in {args.file or '.'}...")
+        target_dir = args.file or "."
+        for root, _, files in os.walk(target_dir):
+            for file in files:
+                if file.endswith(".nv"):
+                    full_path = os.path.join(root, file)
+                    print(f"Transpiling {full_path}...")
+                    # Naive bulk transpile implementation
+                    with open(full_path, "r") as f:
+                        source = f.read()
+                    tokens = Lexer(source).tokenize()
+                    ast = Parser(tokens).parse()
+                    python_code = CodeGenerator().generate(ast)
+                    output_file = full_path.replace(".nv", ".py")
+                    with open(output_file, "w") as f:
+                        f.write(python_code)
 
     elif args.command == "run":
         # Create a temporary file to run

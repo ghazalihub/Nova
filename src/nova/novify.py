@@ -1,7 +1,10 @@
-import ast
+import libcst as cst
 import sys
+import os
+import argparse
+import subprocess
 
-class NovaUnparser(ast.NodeVisitor):
+class NovaConverter(cst.CSTVisitor):
     def __init__(self):
         self.indent_level = 0
         self.result = ""
@@ -10,106 +13,166 @@ class NovaUnparser(ast.NodeVisitor):
         self.result += text
 
     def fill(self, text=""):
-        self.write("\n" + "    " * self.indent_level + text)
+        self.result += "\n" + "    " * self.indent_level + text
 
-    def visit_Module(self, node):
+    def visit_Module(self, node: cst.Module):
         for stmt in node.body:
-            self.visit(stmt)
-        return self.result
+            stmt.visit(self)
+        return False
 
-    def visit_FunctionDef(self, node):
-        self.fill(f"fn {node.name}(")
-        self.visit(node.args)
-        self.write(") {")
+    def visit_FunctionDef(self, node: cst.FunctionDef):
+        # Handle decorators
+        for deco in node.decorators:
+            self.fill(f"@{self.code_for(deco.decorator)}")
+
+        params = []
+        for param in node.params.params:
+            params.append(param.name.value)
+
+        self.fill(f"fn {node.name.value}({', '.join(params)}) {{")
         self.indent_level += 1
-        for stmt in node.body:
-            self.visit(stmt)
+        node.body.visit(self)
         self.indent_level -= 1
         self.fill("}")
+        return False
 
-    def visit_arguments(self, node):
-        args = [arg.arg for arg in node.args]
-        self.write(", ".join(args))
+    def visit_ClassDef(self, node: cst.ClassDef):
+        bases = ""
+        if node.bases:
+            bases = f"({', '.join(self.code_for(b.value) for b in node.bases)})"
 
-    def visit_ClassDef(self, node):
-        self.fill(f"class {node.name} {{")
+        self.fill(f"class {node.name.value}{bases} {{")
         self.indent_level += 1
-        for stmt in node.body:
-            self.visit(stmt)
+        node.body.visit(self)
         self.indent_level -= 1
         self.fill("}")
+        return False
 
-    def visit_Import(self, node):
-        for alias in node.names:
-            self.fill(f"import {alias.name} from \"{alias.name}\";")
-
-    def visit_ImportFrom(self, node):
-        names = ", ".join(alias.name for alias in node.names)
-        self.fill(f"import {{ {names} }} from \"{node.module}\";")
-
-    def visit_If(self, node):
-        self.fill("if (")
-        self.write(self.expr_to_str(node.test))
-        self.write(") {")
-        self.indent_level += 1
+    def visit_SimpleStatementLine(self, node: cst.SimpleStatementLine):
         for stmt in node.body:
-            self.visit(stmt)
-        self.indent_level -= 1
-        self.fill("}")
-        if node.orelse:
-            self.write(" else {")
-            self.indent_level += 1
-            for stmt in node.orelse:
-                self.visit(stmt)
-            self.indent_level -= 1
-            self.fill("}")
+            stmt.visit(self)
+        return False
 
-    def visit_For(self, node):
-        self.fill("for (")
-        self.write(self.expr_to_str(node.target))
-        self.write(" in ")
-        self.write(self.expr_to_str(node.iter))
-        self.write(") {")
-        self.indent_level += 1
-        for stmt in node.body:
-            self.visit(stmt)
-        self.indent_level -= 1
-        self.fill("}")
-
-    def visit_Assign(self, node):
-        target = self.expr_to_str(node.targets[0])
-        value = self.expr_to_str(node.value)
+    def visit_Assign(self, node: cst.Assign):
+        target = self.code_for(node.targets[0].target)
+        value = self.code_for(node.value)
         self.fill(f"let {target} = {value};")
+        return False
 
-    def visit_Expr(self, node):
-        self.fill(self.expr_to_str(node.value) + ";")
+    def visit_Expr(self, node: cst.Expr):
+        self.fill(self.code_for(node.value) + ";")
+        return False
 
-    def visit_Return(self, node):
+    def visit_Return(self, node: cst.Return):
         if node.value:
-            self.fill(f"return {self.expr_to_str(node.value)};")
+            self.fill(f"return {self.code_for(node.value)};")
         else:
             self.fill("return;")
+        return False
 
-    def expr_to_str(self, node):
-        return ast.unparse(node)
+    def visit_If(self, node: cst.If):
+        self.fill(f"if ({self.code_for(node.test)}) {{")
+        self.indent_level += 1
+        node.body.visit(self)
+        self.indent_level -= 1
+        self.fill("}")
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: novify <input.py>")
-        sys.exit(1)
+        if node.orelse:
+            self.write(" else ")
+            node.orelse.visit(self)
+        return False
 
-    input_file = sys.argv[1]
+    def visit_Else(self, node: cst.Else):
+        if isinstance(node.body, cst.If):
+            node.body.visit(self)
+        else:
+            self.write("{")
+            self.indent_level += 1
+            node.body.visit(self)
+            self.indent_level -= 1
+            self.fill("}")
+        return False
+
+    def visit_For(self, node: cst.For):
+        target = self.code_for(node.target)
+        iterable = self.code_for(node.iter)
+        self.fill(f"for ({target} in {iterable}) {{")
+        self.indent_level += 1
+        node.body.visit(self)
+        self.indent_level -= 1
+        self.fill("}")
+        return False
+
+    def visit_While(self, node: cst.While):
+        self.fill(f"while ({self.code_for(node.test)}) {{")
+        self.indent_level += 1
+        node.body.visit(self)
+        self.indent_level -= 1
+        self.fill("}")
+        return False
+
+    def visit_Import(self, node: cst.Import):
+        for alias in node.names:
+            name = self.code_for(alias.name)
+            self.fill(f"import {name} from \"{name}\";")
+        return False
+
+    def visit_ImportFrom(self, node: cst.ImportFrom):
+        module = self.code_for(node.module) if node.module else ""
+        names = []
+        if isinstance(node.names, cst.ImportStar):
+            names = ["*"]
+        else:
+            for alias in node.names:
+                names.append(alias.name.value)
+
+        self.fill(f"import {{ {', '.join(names)} }} from \"{module}\";")
+        return False
+
+    def code_for(self, node):
+        return cst.Module([]).code_for_node(node)
+
+def novify_file(input_file):
     with open(input_file, "r") as f:
         code = f.read()
 
-    tree = ast.parse(code)
-    unparser = NovaUnparser()
-    nova_code = unparser.visit(tree)
+    try:
+        tree = cst.parse_module(code)
+        visitor = NovaConverter()
+        tree.visit(visitor)
 
-    output_file = input_file.replace(".py", ".nv")
-    with open(output_file, "w") as f:
-        f.write(nova_code)
-    print(f"Successfully converted {input_file} to {output_file}")
+        output_file = input_file.replace(".py", ".nv")
+        with open(output_file, "w") as f:
+            f.write(visitor.result.strip())
+        print(f"Successfully converted {input_file} to {output_file} using LibCST")
+    except Exception as e:
+        print(f"Failed to convert {input_file}: {e}")
+
+def main():
+    parser = argparse.ArgumentParser(description="Novify: Convert Python to Nova")
+    parser.add_argument("path", help="File or directory to convert")
+    parser.add_argument("--test", action="store_true", help="Run tests before and after conversion")
+
+    args = parser.parse_args()
+
+    if args.test:
+        print("Running tests before conversion...")
+        subprocess.run(["pytest"], check=False)
+
+    if os.path.isfile(args.path):
+        novify_file(args.path)
+    elif os.path.isdir(args.path):
+        for root, _, files in os.walk(args.path):
+            for file in files:
+                if file.endswith(".py"):
+                    novify_file(os.path.join(root, file))
+    else:
+        print(f"Error: path {args.path} not found.")
+        sys.exit(1)
+
+    if args.test:
+        print("Running tests after conversion...")
+        subprocess.run(["pytest"], check=False)
 
 if __name__ == "__main__":
     main()

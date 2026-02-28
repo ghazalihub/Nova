@@ -1,0 +1,29 @@
+{
+    "scopeName": "source.nova",
+    "patterns": [
+        { "include": "#keywords" },
+        { "include": "#strings" },
+        { "include": "#comments" }
+    ],
+    "repository": {
+        "keywords": {
+            "patterns": [{
+                "name": "keyword.control.nova",
+                "match": "\\b(let|const|fn|class|model|if|else|for|parallel|in|while|try|catch|finally|return|import|from|export|async|await|match|case|train|lazy|with|as|gpu|clean|plot|lock|fmt|select|where|nn|gradient|weights|batch|mmap|schema|struct|panic|recover|assert|test|bench|prompt|secure|shared|state)\\b"
+            }]
+        },
+        "strings": {
+            "patterns": [{
+                "name": "string.quoted.double.nova",
+                "begin": "\"",
+                "end": "\""
+            }]
+        },
+        "comments": {
+            "patterns": [{
+                "name": "comment.line.double-slash.nova",
+                "match": "//.*"
+            }]
+        }
+    }
+}
